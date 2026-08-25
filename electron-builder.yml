@@ -47,7 +47,7 @@ npmRebuild: false
 # first-install download. Both carry blockmaps for differential download.
 publish:
   provider: github
-  owner: SCVN-Zee
+  owner: Supercent-Vietnam
   repo: scvn-cli
 
 mac:

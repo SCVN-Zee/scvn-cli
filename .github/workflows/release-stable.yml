@@ -1,0 +1,109 @@
+# STABLE release. A `v<version>` tag (e.g. v0.5.0) produces the signed +
+# notarized macOS build with the MCP tab HIDDEN and publishes it to GitHub
+# Releases with the electron-updater metadata (latest-mac.yml + zip + blockmaps)
+# that shipped copies use to self-update.
+#
+# Env split by tag, NOT by branch push (nothing runs on push to dev/main):
+#   - v<version> release (no prerelease id)  → this workflow      (stable, signed, MCP hidden)
+#   - v<version> with a prerelease id (v*-*) → release-beta.yml   (beta,  unsigned, MCP visible)
+# The `!v*-*` line below keeps semver prerelease tags off this workflow —
+# without it, `v*` would also match `v0.6.0-beta.1` and double-fire.
+#
+# Required repository secrets (macOS signing + notarization; see README):
+#   CSC_LINK                    base64 of the Developer ID Application .p12
+#   CSC_KEY_PASSWORD            password for that .p12
+#   APPLE_ID                    Apple ID email (notarization)
+#   APPLE_APP_SPECIFIC_PASSWORD app-specific password for APPLE_ID
+#   APPLE_TEAM_ID               Apple Developer Team ID
+# GITHUB_TOKEN (auto) publishes the release; contents:write is granted below.
+
+name: release-stable
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "!v*-*" # exclude semver prerelease tags (handled by release-beta.yml)
+
+# Supersede in-flight runs for the same tag.
+concurrency:
+  group: release-stable-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14 # Apple Silicon (arm64), matches the shipped target
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Verify tag matches package.json version
+        run: |
+          pkg="v$(node -p "require('./package.json').version")"
+          if [ "$pkg" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json ($pkg). Bump the version to match the tag."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      # electron-builder runs parallel GitHub uploaders; if the release does not
+      # yet exist they race and each creates a separate draft, splitting assets
+      # across duplicates. Pre-creating one draft makes every uploader attach to
+      # it. Idempotent: re-runs reuse the existing release for this tag.
+      - name: Ensure a single draft release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --draft \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Automated release $GITHUB_REF_NAME."
+
+      - name: Build, sign/notarize when secrets present, and publish
+        env:
+          # Hide the MCP tab in the shipped build (every tab except mcp).
+          SCVN_TABS: fork,git,packages,settings
+          # Code signing (Developer ID Application) — empty string when unset.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # Notarization (notarytool via Apple ID).
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Publish the release + updater metadata to this repo.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$CSC_LINK" ]; then
+            echo "::warning::No signing certificate (CSC_LINK) configured — building UNSIGNED. The published app opens only via right-click→Open on macOS and will NOT auto-update. Add the signing secrets for a real, auto-updatable release."
+            # electron-builder treats a DEFINED-but-empty CSC_LINK as an explicit
+            # cert (→ "not a file") and would try to notarize with empty creds.
+            # Unset them so it behaves like the unsigned local `desktop:pack`.
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          npm run desktop:publish
+
+      # Trim the release page to the meaningful assets. latest-mac.yml + the zip
+      # MUST stay — electron-updater reads them to self-update shipped copies.
+      # The blockmaps are only a differential-download optimization; without
+      # them the updater falls back to a full zip download, so they can go.
+      - name: Prune blockmaps from the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for asset in $(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name'); do
+            case "$asset" in
+              *.blockmap)
+                echo "Deleting $asset"
+                gh release delete-asset "$GITHUB_REF_NAME" "$asset" --yes ;;
+            esac
+          done

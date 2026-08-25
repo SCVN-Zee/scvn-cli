@@ -25,7 +25,8 @@
     "desktop:start": "electron dist-desktop/main.cjs",
     "desktop:pack": "npm run desktop:build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --config electron-builder.yml --publish never",
     "desktop:release": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish never",
-    "desktop:publish": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always"
+    "desktop:publish": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always",
+    "desktop:publish:beta": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always -c.publish.releaseType=prerelease -c.mac.notarize=false"
   },
   "dependencies": {
     "@clack/prompts": "^1.5.1",

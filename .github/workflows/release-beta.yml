@@ -1,0 +1,98 @@
+# BETA release. A semver PRERELEASE tag `v<version>` where <version> carries a
+# prerelease id (e.g. v0.6.0-beta.1) produces an UNSIGNED macOS build with the
+# MCP tab VISIBLE and publishes it to GitHub Releases as a PRE-RELEASE for
+# internal testers.
+#
+# Why semver prerelease and not a `b` suffix: electron-builder derives the
+# GitHub release tag from package.json `version` (v${version}), NOT from the git
+# tag. So the git tag MUST equal v${version}, and ${version} must be valid
+# semver. `0.5.0b` is invalid semver and would misfile assets under a stray
+# `v0.5.0` draft; `0.6.0-beta.1` derives the matching `v0.6.0-beta.1` tag.
+#
+# Env split by tag, NOT by branch push (nothing runs on push to dev/main):
+#   - v<version> with a prerelease id (v*-*) → this workflow   (beta,  unsigned, MCP visible)
+#   - v<version> release (no prerelease id)  → release-stable.yml (stable, signed, MCP hidden)
+#
+# Unsigned by design: no signing/notarization secrets are read here, so the beta
+# app opens via right-click→Open on macOS and does NOT auto-update.
+name: release-beta
+
+on:
+  push:
+    tags:
+      - "v*-*" # semver prerelease tags only, e.g. v0.6.0-beta.1
+
+concurrency:
+  group: release-beta-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  beta:
+    runs-on: macos-14 # electron-builder --mac must run on macOS
+    env:
+      # Internal build env: show every tab, including MCP.
+      SCVN_TABS: fork,git,packages,settings,mcp
+      # Force an unsigned build (no Developer ID cert, no notarization).
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Verify tag == v${version} and version is a semver prerelease
+        run: |
+          ver="$(node -p "require('./package.json').version")"
+          expected="v${ver}"
+          if [ "$expected" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Beta tag ${GITHUB_REF_NAME} must equal v<version> ($expected). electron-builder publishes to v\${version}; bump package.json to the beta version first."
+            exit 1
+          fi
+          case "$ver" in
+            *-*) : ;; # has a prerelease id (e.g. 0.6.0-beta.1) — good
+            *) echo "::error::Beta requires a semver prerelease version (e.g. 0.6.0-beta.1); package.json is $ver. Use release-stable.yml for a plain release."; exit 1 ;;
+          esac
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (CLI + desktop)
+        run: |
+          npm run typecheck
+          npm run typecheck:desktop
+
+      # electron-builder's parallel uploaders race to create the release; make
+      # one PRE-RELEASE up front so every uploader attaches to it. Idempotent.
+      - name: Ensure a single pre-release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --prerelease \
+              --title "$GITHUB_REF_NAME (beta)" \
+              --notes "Automated UNSIGNED beta $GITHUB_REF_NAME. Opens via right-click→Open on macOS; does not auto-update."
+
+      - name: Build (unsigned, MCP visible) and publish pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run desktop:publish:beta
+
+      # Beta is unsigned and never auto-updates, so the updater manifest and the
+      # differential-download blockmaps are dead weight on the release page.
+      # Leave only the dmg, zip, and GitHub's auto-added source archives.
+      - name: Prune updater plumbing from the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for asset in $(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name'); do
+            case "$asset" in
+              *.blockmap|latest-mac.yml)
+                echo "Deleting $asset"
+                gh release delete-asset "$GITHUB_REF_NAME" "$asset" --yes ;;
+            esac
+          done
