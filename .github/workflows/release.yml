@@ -1,0 +1,59 @@
+# Build, sign, notarize, and publish the scvn desktop app to a GitHub Release
+# when a v* tag is pushed. The published build hides the MCP tab (SCVN_TABS
+# omits `mcp`) and carries the electron-updater metadata (latest-mac.yml + zip
+# + blockmaps) that shipped copies use to self-update.
+#
+# Required repository secrets (macOS signing + notarization; see README):
+#   CSC_LINK                    base64 of the Developer ID Application .p12
+#   CSC_KEY_PASSWORD            password for that .p12
+#   APPLE_ID                    Apple ID email (notarization)
+#   APPLE_APP_SPECIFIC_PASSWORD app-specific password for APPLE_ID
+#   APPLE_TEAM_ID               Apple Developer Team ID
+# GITHUB_TOKEN (auto) publishes the release; contents:write is granted below.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14 # Apple Silicon (arm64), matches the shipped target
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Verify tag matches package.json version
+        run: |
+          pkg="v$(node -p "require('./package.json').version")"
+          if [ "$pkg" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json ($pkg). Bump the version to match the tag."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build, sign, notarize, and publish
+        env:
+          # Hide the MCP tab in the shipped build (every tab except mcp).
+          SCVN_TABS: fork,git,packages,settings
+          # Code signing (Developer ID Application).
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # Notarization (notarytool via Apple ID).
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Publish the release + updater metadata to this repo.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run desktop:publish

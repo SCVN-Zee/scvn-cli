@@ -1,0 +1,68 @@
+# electron-builder.yml — desktop packaging for the scvn GUI.
+#
+# Two build modes off one config:
+#   • Local unsigned (default `npm run desktop:pack`) — sets
+#     CSC_IDENTITY_AUTO_DISCOVERY=false so electron-builder skips signing and
+#     notarization; produces a runnable-but-unsigned .app/.dmg.
+#   • Signed release (`npm run desktop:release`) — with a Developer ID cert in
+#     the keychain (or CSC_LINK/CSC_KEY_PASSWORD) plus the notarization env
+#     (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID, or
+#     APPLE_API_KEY/_ISSUER), electron-builder signs with the hardened runtime,
+#     applies the entitlements below, and notarizes via notarytool.
+#
+# The CLI is untouched: Electron's entry is injected via extraMetadata.main, so
+# the repo package.json `main` stays unset and `bin/scvn` resolution is unchanged.
+
+appId: com.supercent.scvn
+productName: Supercent VN Tools
+
+directories:
+  output: dist-desktop-pack
+
+# `files` scopes the app's own source to the bundled desktop output. It does NOT
+# exclude node_modules: electron-builder always additionally collects the
+# production `dependencies` from package.json into the asar. The host bundle
+# (host.cjs) and main bundle leave those deps external (tsup externalizes
+# `dependencies` by default — host.cjs holds require("execa")/require("fast-glob"),
+# main.cjs holds require("electron-updater")), so that auto-collection is what
+# makes them resolvable at runtime. Do NOT add `!node_modules/**` here — it would
+# break the host (execa/fast-glob) and the updater (electron-updater).
+files:
+  - "dist-desktop/**/*"
+
+# Electron's main entry, injected into the packaged app's package.json only.
+extraMetadata:
+  main: dist-desktop/main.cjs
+
+# utilityProcess.fork needs a real file (not an asar entry); templates are read
+# with fs.access by util/install-root. Unpack the whole desktop bundle so
+# host.cjs and templates/ stay real siblings at runtime.
+asarUnpack:
+  - "dist-desktop/**/*"
+
+npmRebuild: false
+
+# electron-updater consumes latest-mac.yml + the .zip (Squirrel.Mac updates from
+# the zip, not the dmg) published to the GitHub Release. The dmg remains the
+# first-install download. Both carry blockmaps for differential download.
+publish:
+  provider: github
+  owner: SCVN-Zee
+  repo: scvn-cli
+
+mac:
+  category: public.app-category.developer-tools
+  icon: desktop/build/icon.icns
+  target:
+    - dir
+    - dmg
+    - zip
+  # Hardened runtime + entitlements are required for notarization. They only
+  # take effect when a signing identity is present; unsigned local builds
+  # (CSC_IDENTITY_AUTO_DISCOVERY=false) skip signing and ignore these.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: desktop/build/entitlements.mac.plist
+  entitlementsInherit: desktop/build/entitlements.mac.inherit.plist
+  # notarize with the ambient Apple credentials during a signed release.
+  notarize: true

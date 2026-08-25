@@ -1,0 +1,5 @@
+# Sample mergespecfile.txt (abbreviated)
+# ... various tool definitions ...
+
+# Default fallback on macOS — Beyond Compare
+* use "/Applications/Beyond Compare.app/Contents/MacOS/bcomp" "%l" "%r" "%b" "%d"

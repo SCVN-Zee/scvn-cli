@@ -1,0 +1,17 @@
+# -----------------------------------------------------------------------------
+# Unity YAML — smart merge
+# -----------------------------------------------------------------------------
+*.unity merge=unityyamlmerge
+*.prefab merge=unityyamlmerge
+*.asset merge=unityyamlmerge
+*.meta merge=unityyamlmerge
+*.mat merge=unityyamlmerge
+*.anim merge=unityyamlmerge
+*.controller merge=unityyamlmerge
+*.overrideController merge=unityyamlmerge
+*.physicMaterial merge=unityyamlmerge
+*.physicsMaterial2D merge=unityyamlmerge
+*.lighting merge=unityyamlmerge
+*.terrainlayer merge=unityyamlmerge
+*.spriteatlas merge=unityyamlmerge
+*.mask merge=unityyamlmerge

@@ -1,0 +1,2 @@
+# Sample mergespecfile.txt without Beyond Compare line
+* use "/some/other/tool" "%l" "%r" "%b" "%d"

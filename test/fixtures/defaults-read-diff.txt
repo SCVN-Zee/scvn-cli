@@ -1,0 +1,5 @@
+{
+    ApplicationPath = "/Applications/Beyond Compare.app/Contents/MacOS/bcomp";
+    Arguments = "$LOCAL $REMOTE";
+    Type = BeyondCompare;
+}

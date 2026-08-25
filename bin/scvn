@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# bin/scvn — launcher that resolves a Node runtime, then runs the built CLI.
+#
+# Three tiers, so an artist with no Node still works (the whole point of `scvn pack`):
+#   1. bundled Node at <root>/node/bin/node (shipped inside a `scvn pack` bundle)
+#   2. a system Node >= 20
+#   3. guided install via bin/_onboard-node.sh (the only tier that runs without Node)
+#
+# The resolution chain uses explicit `if` blocks so an expected probe failure (wrong-arch bundled
+# binary, old system Node) does NOT trip `set -e` before the next tier is tried.
+set -euo pipefail
+DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+ROOT="$(cd -- "$DIR/.." &>/dev/null && pwd)"
+
+NODE_BIN=""
+
+# Tier 1 — bundled Node. Keep this path in lockstep with BUNDLED_NODE_SUBPATH ("node/bin/node").
+BUNDLED="$ROOT/node/bin/node"
+if [ -x "$BUNDLED" ]; then
+  # A freshly-unzipped binary carries com.apple.quarantine; strip it so Gatekeeper does not block
+  # the (notarized) Node. A failure to strip (e.g. MDM-locked Mac) is surfaced below, not swallowed.
+  xattr -d com.apple.quarantine "$BUNDLED" >/dev/null 2>&1 || true
+  if "$BUNDLED" --version >/dev/null 2>&1; then
+    NODE_BIN="$BUNDLED"
+  else
+    printf 'scvn: a bundled Node is present but will not run (wrong CPU arch, or quarantined on a locked-down Mac).\n' >&2
+    printf 'scvn: if it is quarantine, run:  xattr -dr com.apple.quarantine "%s"\n' "$ROOT" >&2
+  fi
+fi
+
+# Tier 2 — a system Node >= 20.
+if [ -z "$NODE_BIN" ] && command -v node >/dev/null 2>&1; then
+  major="$(node --version 2>/dev/null | sed 's/^v//; s/\..*//')"
+  if printf '%s' "$major" | grep -Eq '^[0-9]+$' && [ "$major" -ge 20 ]; then
+    NODE_BIN="node"
+  fi
+fi
+
+# Tier 3 — guided install (runs without Node). On success it prints the absolute node path.
+if [ -z "$NODE_BIN" ]; then
+  # `if VAR=$(...)` keeps the failing command substitution from tripping `set -e`.
+  if installed="$("$DIR/_onboard-node.sh" "$@")"; then
+    if [ -n "$installed" ] && [ -x "$installed" ]; then
+      NODE_BIN="$installed"
+    elif command -v node >/dev/null 2>&1; then
+      NODE_BIN="node"
+    else
+      printf 'scvn: Node was installed but is not on this shell PATH yet — open a new terminal and re-run.\n' >&2
+      exit 1
+    fi
+  else
+    exit $?
+  fi
+fi
+
+exec "$NODE_BIN" "$ROOT/dist/cli.mjs" "$@"
