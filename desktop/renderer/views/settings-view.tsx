@@ -14,9 +14,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { invokeForResult, pickDirectory } from "@/lib/bridge";
 import { logLineClass, useHostRun } from "@/lib/use-host-run";
 import { cn } from "@/lib/utils";
+
+import type { UpdateChannel } from "@shared/ipc";
+
+declare const __APP_VERSION__: string | undefined;
+const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "";
 
 export function SettingsView(): React.JSX.Element {
   return (
@@ -24,10 +36,14 @@ export function SettingsView(): React.JSX.Element {
       <Tabs defaultValue="config">
         <TabsList>
           <TabsTrigger value="config">Config</TabsTrigger>
+          <TabsTrigger value="updates">Updates</TabsTrigger>
           <TabsTrigger value="doctor">Doctor</TabsTrigger>
         </TabsList>
         <TabsContent value="config">
           <ConfigPanel />
+        </TabsContent>
+        <TabsContent value="updates">
+          <UpdatesPanel />
         </TabsContent>
         <TabsContent value="doctor">
           <DoctorPanel />
@@ -130,6 +146,69 @@ function ConfigPanel(): React.JSX.Element {
             </div>
           </>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+const CHANNEL_LABEL: Record<UpdateChannel, string> = {
+  stable: "Stable",
+  beta: "Beta",
+};
+
+function UpdatesPanel(): React.JSX.Element {
+  const [channel, setChannel] = useState<UpdateChannel | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.scvn
+      .getUpdateChannel()
+      .then((value) => {
+        if (!cancelled) setChannel(value);
+      })
+      .catch(() => {
+        if (!cancelled) setChannel("stable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function change(next: UpdateChannel): void {
+    setChannel(next);
+    window.scvn.setUpdateChannel(next);
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Updates</CardTitle>
+        <CardDescription>
+          Choose which releases this app updates to. Beta includes pre-releases for early testing.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="settings-update-channel">Update channel</Label>
+          <Select
+            value={channel ?? undefined}
+            disabled={channel === null}
+            onValueChange={(value) => change(value as UpdateChannel)}
+          >
+            <SelectTrigger id="settings-update-channel" className="w-[220px]">
+              <SelectValue placeholder="Loading…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="stable">Stable — full releases only</SelectItem>
+              <SelectItem value="beta">Beta — includes pre-releases</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-sm text-muted-foreground" role="status">
+            {channel === null
+              ? "Loading…"
+              : `Following the ${CHANNEL_LABEL[channel]} channel${APP_VERSION ? ` · current version v${APP_VERSION}` : ""}.`}
+          </p>
+        </div>
       </CardContent>
     </Card>
   );

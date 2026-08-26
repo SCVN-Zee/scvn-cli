@@ -418,11 +418,17 @@ script, e.g. `SCVN_TABS=fork,git,packages,settings npm run desktop:pack`.
 Shipped copies self-update via `electron-updater`: the update banner checks the
 GitHub Release on launch and, when a newer version exists, offers **Download
 update** → progress → **Restart & install**. Downloads are user-initiated
-(`autoDownload` is off); a downloaded update also installs on next quit. Beta
-builds track the beta channel automatically (electron-updater enables
-`allowPrerelease` for a prerelease app version). In dev and the headless
-self-test the updater is not wired (no `app-update.yml`), so the banner stays
-hidden.
+(`autoDownload` is off); a downloaded update also installs on next quit. The
+update channel is user-selectable in **Settings → Updates**: **Stable** takes
+full releases only (`allowPrerelease` off), **Beta** also considers GitHub
+pre-releases (`allowPrerelease` on). Switching back to **Stable** from a beta
+build enables `allowDowngrade` so the app returns to the current stable even
+though it is a lower semver than the installed pre-release.
+The choice persists in `update-prefs.json` under the app's `userData` dir and is
+applied to the updater on launch; changing it re-checks immediately. First run
+defaults to the build's own track (a prerelease build → Beta, a plain release →
+Stable). In dev and the headless self-test the updater is not wired (no
+`app-update.yml`), so the banner stays hidden while the preference still persists.
 
 Architecture: a sandboxed renderer (no Node access) draws the UI; the Electron
 main process owns the window, native dialogs, and an IPC broker; a long-lived

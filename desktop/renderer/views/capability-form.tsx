@@ -419,7 +419,7 @@ export function ProjectControl(props: {
       <Label htmlFor={id}>{label}</Label>
       <div className="flex gap-2">
         <Select value={value || undefined} onValueChange={onChange}>
-          <SelectTrigger id={id} className="flex-1" aria-label={selected ? selected.name : placeholder}>
+          <SelectTrigger id={id} className="min-w-0 flex-1" aria-label={selected ? selected.name : placeholder}>
             {selected ? (
               <ProjectOptionRow project={selected} />
             ) : (

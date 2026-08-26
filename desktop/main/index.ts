@@ -10,7 +10,8 @@
 import { app, BrowserWindow, dialog, ipcMain, utilityProcess, type OpenDialogOptions, type UtilityProcess } from "electron";
 import path from "node:path";
 import os from "node:os";
-import type { FromHost, PromptRequestMessage, ToHost, UpdateStatus } from "../shared/ipc.js";
+import fs from "node:fs";
+import type { FromHost, PromptRequestMessage, ToHost, UpdateChannel, UpdateStatus } from "../shared/ipc.js";
 import { loadConfig } from "../../src/config/load.js";
 import electronUpdater from "electron-updater";
 
@@ -23,6 +24,8 @@ const CHANNEL_UPDATE_STATUS = "scvn:update-status";
 const CHANNEL_UPDATE_CHECK = "scvn:update-check";
 const CHANNEL_UPDATE_DOWNLOAD = "scvn:update-download";
 const CHANNEL_UPDATE_INSTALL = "scvn:update-install";
+const CHANNEL_UPDATE_GET_CHANNEL = "scvn:update-get-channel";
+const CHANNEL_UPDATE_SET_CHANNEL = "scvn:update-set-channel";
 
 // Bundled to CJS by tsup, so __dirname resolves to dist-desktop/.
 const HOST_ENTRY = path.join(__dirname, "host.cjs");
@@ -125,6 +128,58 @@ function sendUpdateStatus(status: UpdateStatus): void {
   mainWindow?.webContents.send(CHANNEL_UPDATE_STATUS, status);
 }
 
+// electron-updater is only wired for a packaged, non-self-test build; this flag
+// gates the live retune in the set-channel handler (dev just persists the pref).
+let autoUpdaterReady = false;
+
+/** Path to the desktop-only update preferences file (main-owned, not the CLI config). */
+function updatePrefsPath(): string {
+  return path.join(app.getPath("userData"), "update-prefs.json");
+}
+
+/**
+ * The update channel to use when nothing is persisted yet. A prerelease app
+ * version (e.g. 0.6.0-beta.1) tracks `beta`; a plain release tracks `stable`.
+ * This mirrors electron-updater's own default so existing installs are unchanged.
+ */
+function defaultUpdateChannel(): UpdateChannel {
+  return app.getVersion().includes("-") ? "beta" : "stable";
+}
+
+/** Read the persisted channel, falling back to the build's own track. */
+function readUpdateChannel(): UpdateChannel {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(updatePrefsPath(), "utf8")) as { channel?: unknown };
+    if (parsed.channel === "beta" || parsed.channel === "stable") return parsed.channel;
+  } catch {
+    // Missing/corrupt prefs → fall through to the build default.
+  }
+  return defaultUpdateChannel();
+}
+
+/** Persist the chosen channel; a write failure is logged, never fatal. */
+function writeUpdateChannel(channel: UpdateChannel): void {
+  try {
+    fs.writeFileSync(updatePrefsPath(), `${JSON.stringify({ channel }, null, 2)}\n`);
+  } catch (err) {
+    process.stderr.write(`update-prefs write failed: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+}
+
+/**
+ * Tune the updater to a channel. Both flags are set explicitly, in both
+ * directions, because electron-updater only sets them for you via the `channel`
+ * setter (which we don't use — we drive one GitHub repo by allowPrerelease):
+ *  - stable: full releases only (allowPrerelease off), and allowDowngrade ON so
+ *    a tester leaving beta can return to the current stable even though it is a
+ *    lower semver than their prerelease build (e.g. 0.5.2 < 0.6.0-beta.1).
+ *  - beta: also consider prereleases; roll-forward only (no downgrade needed).
+ */
+function applyUpdateChannel(channel: UpdateChannel): void {
+  autoUpdater.allowPrerelease = channel === "beta";
+  autoUpdater.allowDowngrade = channel === "stable";
+}
+
 /**
  * Wire electron-updater to the renderer. The UI drives the flow: it checks on
  * mount, downloads on user request (autoDownload off), and restarts to install.
@@ -136,6 +191,8 @@ function setupAutoUpdater(): void {
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  // Honor the persisted channel: sets allowPrerelease + allowDowngrade together.
+  applyUpdateChannel(readUpdateChannel());
 
   autoUpdater.on("checking-for-update", () => sendUpdateStatus({ phase: "checking" }));
   autoUpdater.on("update-available", (info) =>
@@ -158,9 +215,20 @@ function setupAutoUpdater(): void {
   autoUpdater.on("update-downloaded", (info) =>
     sendUpdateStatus({ phase: "downloaded", version: info.version }),
   );
-  autoUpdater.on("error", (err) =>
-    sendUpdateStatus({ phase: "error", message: err instanceof Error ? err.message : String(err) }),
-  );
+  autoUpdater.on("error", (err) => {
+    const message = err instanceof Error ? err.message : String(err);
+    // A missing update manifest is not a failure: it means no installable
+    // update is currently advertised. This happens transiently while a new
+    // release is still publishing (the pushed tag is already discoverable but
+    // its latest-mac.yml asset 404s until the release goes live) and
+    // permanently for an unsigned build whose manifest was pruned. Surface it
+    // as "no update available", not a red error banner the user can only retry.
+    if (/HttpError: 404|Cannot find .*\.ya?ml/i.test(message)) {
+      sendUpdateStatus({ phase: "not-available" });
+      return;
+    }
+    sendUpdateStatus({ phase: "error", message });
+  });
 
   // Renderer-driven controls (errors surface via the `error` event above).
   ipcMain.on(CHANNEL_UPDATE_CHECK, () => {
@@ -170,6 +238,8 @@ function setupAutoUpdater(): void {
     autoUpdater.downloadUpdate().catch(() => {});
   });
   ipcMain.on(CHANNEL_UPDATE_INSTALL, () => autoUpdater.quitAndInstall());
+
+  autoUpdaterReady = true;
 }
 
 function createWindow(): void {
@@ -243,6 +313,18 @@ app.whenReady().then(() => {
     (_event, options: { kind?: "dir" | "path"; title?: string; defaultPath?: string }) =>
       openPathDialog(options ?? {}),
   );
+
+  // Update-channel preference (works in dev too — persists even when the
+  // updater itself is inert; the live retune only runs once it's wired).
+  ipcMain.handle(CHANNEL_UPDATE_GET_CHANNEL, () => readUpdateChannel());
+  ipcMain.on(CHANNEL_UPDATE_SET_CHANNEL, (_event, channel: unknown) => {
+    const next: UpdateChannel = channel === "beta" ? "beta" : "stable";
+    writeUpdateChannel(next);
+    if (autoUpdaterReady) {
+      applyUpdateChannel(next);
+      autoUpdater.checkForUpdates().catch(() => {});
+    }
+  });
 
   spawnHost();
   createWindow();

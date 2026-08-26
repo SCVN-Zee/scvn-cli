@@ -69,13 +69,16 @@ jobs:
           npm run typecheck:desktop
 
       # electron-builder's parallel uploaders race to create the release; make
-      # one PRE-RELEASE up front so every uploader attaches to it. Idempotent.
-      - name: Ensure a single pre-release exists
+      # one DRAFT pre-release up front so every uploader attaches to it, and
+      # un-draft it only at the very end (see the final step). A draft keeps the
+      # release — and its still-uploading latest-mac.yml — invisible to running
+      # apps' updaters until every asset is in place. Idempotent.
+      - name: Ensure a single draft pre-release exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --prerelease \
+            gh release create "$GITHUB_REF_NAME" --draft --prerelease \
               --title "$GITHUB_REF_NAME" \
               --notes "Automated beta $GITHUB_REF_NAME (macOS arm64). First run may need right-click→Open; updates apply automatically when the build is signed."
       - name: Build, sign, and publish pre-release
@@ -110,3 +113,13 @@ jobs:
                 gh release delete-asset "$GITHUB_REF_NAME" "$asset" --yes ;;
             esac
           done
+
+      # Publish (un-draft) the pre-release as the FINAL step — only after every
+      # asset is uploaded and, for an unsigned build, the manifest is pruned.
+      # Keeps --prerelease so beta stays off the stable channel. Closes the
+      # window in which a running beta app's updater could see the pushed tag
+      # while latest-mac.yml still 404'd on the draft. Runs only on build success.
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease

@@ -161,6 +161,13 @@ export type UpdateStatus =
   | { phase: "downloaded"; version: string }
   | { phase: "error"; message: string };
 
+/**
+ * The update track the app follows. `stable` restricts electron-updater to full
+ * GitHub releases; `beta` also considers prereleases (allowPrerelease). Persisted
+ * in the main process; chosen from Settings → Updates.
+ */
+export type UpdateChannel = "stable" | "beta";
+
 // ---------------------------------------------------------------------------
 // Preload-exposed renderer API (window.scvn)
 // ---------------------------------------------------------------------------
@@ -188,6 +195,10 @@ export interface ScvnBridge {
   downloadUpdate(): void;
   /** Quit and install a downloaded update, relaunching on the new version. */
   quitAndInstall(): void;
+  /** Read the persisted update channel (stable | beta). */
+  getUpdateChannel(): Promise<UpdateChannel>;
+  /** Persist the update channel; when packaged, retunes the updater and re-checks. */
+  setUpdateChannel(channel: UpdateChannel): void;
 }
 
 declare global {

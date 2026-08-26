@@ -8,7 +8,7 @@
  */
 
 import { contextBridge, ipcRenderer } from "electron";
-import type { FromHost, PromptValue, RequestId, ScvnBridge, ToHost, UpdateStatus } from "./shared/ipc.js";
+import type { FromHost, PromptValue, RequestId, ScvnBridge, ToHost, UpdateChannel, UpdateStatus } from "./shared/ipc.js";
 
 const CHANNEL_TO_HOST = "scvn:to-host";
 const CHANNEL_FROM_HOST = "scvn:from-host";
@@ -18,6 +18,8 @@ const CHANNEL_UPDATE_STATUS = "scvn:update-status";
 const CHANNEL_UPDATE_CHECK = "scvn:update-check";
 const CHANNEL_UPDATE_DOWNLOAD = "scvn:update-download";
 const CHANNEL_UPDATE_INSTALL = "scvn:update-install";
+const CHANNEL_UPDATE_GET_CHANNEL = "scvn:update-get-channel";
+const CHANNEL_UPDATE_SET_CHANNEL = "scvn:update-set-channel";
 
 const bridge: ScvnBridge & { __selftest(ok: boolean): void } = {
   invoke(command: string, args?: unknown): RequestId {
@@ -64,6 +66,14 @@ const bridge: ScvnBridge & { __selftest(ok: boolean): void } = {
 
   quitAndInstall(): void {
     ipcRenderer.send(CHANNEL_UPDATE_INSTALL);
+  },
+
+  getUpdateChannel(): Promise<UpdateChannel> {
+    return ipcRenderer.invoke(CHANNEL_UPDATE_GET_CHANNEL) as Promise<UpdateChannel>;
+  },
+
+  setUpdateChannel(channel: UpdateChannel): void {
+    ipcRenderer.send(CHANNEL_UPDATE_SET_CHANNEL, channel);
   },
 
   /** Test-only: report the headless self-test outcome so main can exit. */
