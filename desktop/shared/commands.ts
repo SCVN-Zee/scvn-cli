@@ -287,5 +287,3 @@ export const ALL_CAPABILITIES: CapabilitySpec[] = [
  */
 export const CAPABILITIES: CapabilitySpec[] = filterCapabilities(ALL_CAPABILITIES, resolveTabsEnv());
 
-/** Ids this build enabled — the host registry filter's source of truth. */
-export const ENABLED_TAB_IDS: string[] = CAPABILITIES.map((c) => c.id);

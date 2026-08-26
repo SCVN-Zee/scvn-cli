@@ -26,6 +26,7 @@ import type { FromHost, PromptValue } from "../../desktop/shared/ipc.js";
 import { runConfig } from "../../src/commands/config.js";
 import { fakePrompt } from "../../src/ui/prompt.js";
 import { registry } from "../../desktop/host/registry.js";
+import { capabilities } from "../../desktop/host/capabilities.js";
 
 // ---------------------------------------------------------------------------
 // Fake channel
@@ -241,5 +242,12 @@ describe("registry exposes form prepare/execute routes", () => {
     expect(typeof registry["ignore-dirty:set"]).toBe("function");
     // The old prompt-channel run command is gone (page view replaced it).
     expect(registry["ignore-dirty"]).toBeUndefined();
+  });
+
+  it("registers every capability command regardless of SCVN_TABS (reveal invariant)", () => {
+    // Tab hiding is renderer visibility-only: the host must serve every
+    // capability command so a ⌘⇧.-revealed tab is genuinely invokable. If
+    // host-side filtering is ever reintroduced, this fails loudly.
+    expect(Object.keys(registry).sort()).toEqual(["ping", ...Object.keys(capabilities)].sort());
   });
 });

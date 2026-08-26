@@ -16,7 +16,7 @@
 
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { access } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 
 // undefined = not yet probed, null = probed and not found
 let _installRoot: string | null | undefined;
@@ -35,17 +35,24 @@ export async function findInstallRoot(startDirOverride?: string): Promise<string
   let dir = startDirOverride ?? path.dirname(fileURLToPath(import.meta.url));
   let found: string | null = null;
 
-  // Walk up at most 6 levels (dist/ → root, or src/util/ → root, plus slack)
+  // Walk up at most 6 levels (dist/ → root, or src/util/ → root, plus slack).
+  // Probe with stat (not access): Electron's asar filesystem shim returns
+  // ENOENT for access() on a *directory* inside an .asar, but stat() resolves
+  // it correctly. The desktop host runs from an asar path, so an access-based
+  // probe silently fails there and the root never resolves.
   for (let i = 0; i < 6; i++) {
     try {
-      await access(path.join(dir, "templates"));
-      found = dir;
-      break;
+      const entry = await stat(path.join(dir, "templates"));
+      if (entry.isDirectory()) {
+        found = dir;
+        break;
+      }
     } catch {
-      const parent = path.dirname(dir);
-      if (parent === dir) break; // reached filesystem root
-      dir = parent;
+      // templates/ not here — fall through to walk up.
     }
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
   }
 
   if (useCache) _installRoot = found;

@@ -12,7 +12,7 @@
 
 import * as React from "react";
 
-import { CAPABILITIES, type LaunchValues, type EditableTemplateKey } from "@shared/commands";
+import { CAPABILITIES, ALL_CAPABILITIES, type LaunchValues, type EditableTemplateKey } from "@shared/commands";
 import { AppShell } from "@/components/app-shell";
 import { CapabilityForm } from "@/views/capability-form";
 import { RunOpView } from "@/views/run-op";
@@ -45,6 +45,45 @@ function readSelftest(): string | null {
   }
 }
 
+const REVEAL_KEY = "scvn.tabs.revealHidden";
+
+/**
+ * Reveal tabs that this build's `SCVN_TABS` hid from the sidebar. ⌘/Ctrl-⇧-.
+ * toggles it (macOS Finder's reveal-hidden gesture); the choice persists to
+ * localStorage. `event.code === "Period"` is layout-robust — Shift+Period emits
+ * ">" as `event.key` on many layouts. A no-op when the build ships every tab.
+ */
+function useRevealHidden(): boolean {
+  const [revealed, setRevealed] = React.useState<boolean>(() => {
+    try {
+      return localStorage.getItem(REVEAL_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === "Period") {
+        event.preventDefault();
+        setRevealed((prev) => {
+          const next = !prev;
+          try {
+            localStorage.setItem(REVEAL_KEY, next ? "1" : "0");
+          } catch {
+            /* storage unavailable — in-memory only */
+          }
+          return next;
+        });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  return revealed;
+}
+
 export function App() {
   const selftest = React.useMemo(readSelftest, []);
   const [selectedId, setSelectedId] = React.useState<string>(() => CAPABILITIES[0]?.id ?? "");
@@ -52,9 +91,21 @@ export function App() {
     selftest ? { kind: "run", command: selftest, args: undefined, title: selftest } : { kind: "form" },
   );
 
+  const revealed = useRevealHidden();
+  const items = React.useMemo(
+    () => (revealed ? ALL_CAPABILITIES : CAPABILITIES),
+    [revealed],
+  );
+
+  // A re-hide (⌘⇧.) can drop the selected tab from the sidebar; fall back to
+  // the first visible tab so the content pane never strands on a hidden one.
+  React.useEffect(() => {
+    if (!items.some((c) => c.id === selectedId)) setSelectedId(items[0]?.id ?? "");
+  }, [items, selectedId]);
+
   const selected = React.useMemo(
-    () => CAPABILITIES.find((c) => c.id === selectedId) ?? null,
-    [selectedId],
+    () => items.find((c) => c.id === selectedId) ?? null,
+    [items, selectedId],
   );
 
   const selectCapability = React.useCallback((id: string) => {
@@ -64,7 +115,7 @@ export function App() {
 
   const onRun = React.useCallback(
     (capabilityId: string, values: LaunchValues) => {
-      const spec = CAPABILITIES.find((c) => c.id === capabilityId);
+      const spec = items.find((c) => c.id === capabilityId);
       setRoute({
         kind: "run",
         command: capabilityId,
@@ -72,7 +123,7 @@ export function App() {
         title: spec?.label ?? capabilityId,
       });
     },
-    [],
+    [items],
   );
 
   const onEditTemplate = React.useCallback((key: EditableTemplateKey) => {
@@ -97,7 +148,7 @@ export function App() {
         : (selected?.label ?? "Supercent VN Tools");
 
   return (
-    <AppShell items={CAPABILITIES} selectedId={selectedId} onSelect={selectCapability} title={title}>
+    <AppShell items={items} selectedId={selectedId} onSelect={selectCapability} title={title}>
       {route.kind === "run" ? (
         <RunOpView
           key={route.command + JSON.stringify(route.args)}

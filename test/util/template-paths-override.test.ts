@@ -19,7 +19,9 @@ describe("resolveTemplateKey — user override layer", () => {
   it("falls back to the bundled path when no override exists", async () => {
     const root = await tmpDir();
     const resolved = await resolveTemplateKey("gitignore", root);
-    expect(resolved).toBe(await resolveTemplatePath(".gitignore"));
+    // Bundled default ships as `gitignore` (no dot); electron-builder strips a
+    // packaged `.gitignore`. The `.gitignore` name is only the output/override.
+    expect(resolved).toBe(await resolveTemplatePath("gitignore"));
   });
 
   it("prefers the override file under <root>/templates when present", async () => {

@@ -351,7 +351,7 @@ function LaunchFieldControl(props: {
  */
 function ProjectOptionRow({ project }: { project: DiscoveredProject }): React.JSX.Element {
   return (
-    <span className="flex w-full items-center gap-2">
+    <span className="flex w-full min-w-0 items-center gap-2">
       <span className="min-w-0 flex-1 truncate">
         <span className="font-medium text-foreground">{project.name}</span>
         {project.scene ? <span className="ml-1 text-muted-foreground">({project.scene})</span> : null}

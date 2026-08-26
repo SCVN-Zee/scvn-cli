@@ -39,6 +39,28 @@ export function templateFilename(key: TemplateKey): string {
 }
 
 // ---------------------------------------------------------------------------
+// Key → bundled source filename
+// ---------------------------------------------------------------------------
+
+// The filename of the read-only default artifact inside the bundled templates/
+// dir. This is deliberately NOT the same as templateFilename() for `gitignore`:
+// electron-builder's default file filter strips any packaged file named
+// `.gitignore` (and `.gitkeep`), so the desktop app would ship without the
+// bundled default. Storing it as `gitignore` (no leading dot, matching the
+// git-exclude / gitattributes-* artifacts) survives packaging. The output
+// written into a user's project is still `.gitignore` (see setup-templates
+// resolveTargetPath), and the editor still displays templateFilename().
+const SOURCE_FILENAME_MAP: Record<TemplateKey, string> = {
+  ...FILENAME_MAP,
+  gitignore: "gitignore",
+};
+
+/** Filename of the bundled default artifact for `key` inside templates/. */
+export function templateSourceFilename(key: TemplateKey): string {
+  return SOURCE_FILENAME_MAP[key];
+}
+
+// ---------------------------------------------------------------------------
 // Walk up from module location to find templates/ directory
 // ---------------------------------------------------------------------------
 
@@ -76,13 +98,12 @@ export async function resolveTemplateKey(
   key: TemplateKey,
   overrideRoot?: string,
 ): Promise<string> {
-  const filename = templateFilename(key);
-  const overridePath = path.join(getTemplatesOverrideDir(overrideRoot), filename);
+  const overridePath = path.join(getTemplatesOverrideDir(overrideRoot), templateFilename(key));
   try {
     await fs.access(overridePath);
     return overridePath;
   } catch {
-    return resolveTemplatePath(filename);
+    return resolveTemplatePath(templateSourceFilename(key));
   }
 }
 

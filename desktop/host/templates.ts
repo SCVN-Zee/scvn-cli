@@ -20,6 +20,7 @@ import {
   resolveTemplateKey,
   resolveTemplatePath,
   templateFilename,
+  templateSourceFilename,
 } from "../../src/util/template-paths.js";
 import {
   EDITABLE_TEMPLATE_KEYS,
@@ -52,7 +53,7 @@ export async function templatesRead(_session: unknown, args: unknown): Promise<T
   const filename = templateFilename(key);
   const [effectivePath, defaultPath] = await Promise.all([
     resolveTemplateKey(key),
-    resolveTemplatePath(filename),
+    resolveTemplatePath(templateSourceFilename(key)),
   ]);
   const [content, defaultContent] = await Promise.all([
     readFile(effectivePath, "utf8"),
