@@ -363,35 +363,66 @@ and `xcrun stapler validate dist-desktop-pack/scvn-*.dmg`.
 
 ### Automated release & in-app updates
 
-Pushing a `v*` tag runs `.github/workflows/release.yml` on an Apple-Silicon
-runner: it builds the desktop app, signs + notarizes it, and publishes a GitHub
-Release with the `.dmg` (first install), a `.zip` + `latest-mac.yml` +
-blockmaps (consumed by the in-app updater). The tag must match `package.json`
-`version` (the workflow fails otherwise), so bump the version first:
+Releases are **tag-driven** on an Apple-Silicon runner; nothing runs on branch
+pushes:
+
+- `v<version>` with no prerelease id (e.g. `v0.6.0`) → `.github/workflows/release-stable.yml`
+  (stable; MCP tab hidden).
+- `v<version>` with a prerelease id (e.g. `v0.6.0-beta.1`) → `.github/workflows/release-beta.yml`
+  (beta pre-release; MCP tab hidden — same tab set as stable).
+
+The tag must equal `package.json` `version` (the workflow fails otherwise), so
+bump first:
 
 ```sh
 npm version 0.6.0          # bumps package.json + creates the v0.6.0 tag
 git push origin main --tags
 ```
 
-The published build **hides the MCP tab**: the workflow sets
-`SCVN_TABS=fork,git,packages,settings`, which the bundlers bake into both the
-renderer catalog and the host command registry — the tab is neither rendered
-nor invokable. To build such a variant locally, prefix any desktop script, e.g.
-`SCVN_TABS=fork,git,packages,settings npm run desktop:pack`.
+Both workflows share `.github/scripts/build-sign-publish.sh`, which selects the
+**best available signing tier** and publishes the `.dmg` (first install) plus —
+when the build can self-update — the `.zip` + `latest-mac.yml` + blockmaps that
+`electron-updater` consumes:
 
-Required repository **secrets** (Settings → Secrets → Actions): `CSC_LINK`
-(base64 of the Developer ID Application `.p12`), `CSC_KEY_PASSWORD`, and the
-notarization trio `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`.
-`GITHUB_TOKEN` (built-in) publishes the release. Auto-update on macOS only works
-for a **signed + notarized** build — Squirrel refuses to swap an unsigned app.
+| Tier | Enabled by | First run | Auto-update |
+| --- | --- | --- | --- |
+| Apple Developer ID + notarization | `CSC_LINK` (+ Apple trio) | opens normally | yes |
+| Stable self-signed cert | `SCVN_SELFSIGN_P12` | right-click → Open | yes (no Apple account) |
+| Ad-hoc fallback | no secrets | right-click → Open | no (manifest pruned) |
+
+macOS auto-update (Squirrel.Mac) only requires that an update satisfy the
+running app's code-signing **designated requirement** — i.e. be signed by the
+**same certificate** — not that it be Apple-notarized. A **stable self-signed
+cert** therefore enables auto-update with no Apple Developer account; only the
+first install carries the "unidentified developer" prompt. Ad-hoc signing pins a
+per-build `cdhash`, so no later build can satisfy the prior one — those releases
+prune `latest-mac.yml` so the app never advertises an update it cannot install.
+
+**Tier 1 secrets** (Settings → Secrets → Actions): `CSC_LINK` (base64 of the
+Developer ID Application `.p12`), `CSC_KEY_PASSWORD`, `APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`.
+
+**Tier 2 secrets** (self-signed auto-update, free): generate a stable cert once,
+then set the two printed secrets — reuse the **same** cert for every release, or
+existing installs will refuse the update:
+
+```sh
+./.github/scripts/gen-selfsign-cert.sh   # prints SCVN_SELFSIGN_P12 + SCVN_SELFSIGN_PASSWORD
+```
+
+`GITHUB_TOKEN` (built-in) publishes the release. The published build hides the
+MCP tab via `SCVN_TABS=fork,git,packages,settings` (baked into the renderer
+catalog and host registry); build that variant locally by prefixing any desktop
+script, e.g. `SCVN_TABS=fork,git,packages,settings npm run desktop:pack`.
 
 Shipped copies self-update via `electron-updater`: the update banner checks the
 GitHub Release on launch and, when a newer version exists, offers **Download
 update** → progress → **Restart & install**. Downloads are user-initiated
-(`autoDownload` is off); a downloaded update also installs on next quit. In dev
-and the headless self-test the updater is not wired (no `app-update.yml`), so
-the banner stays hidden.
+(`autoDownload` is off); a downloaded update also installs on next quit. Beta
+builds track the beta channel automatically (electron-updater enables
+`allowPrerelease` for a prerelease app version). In dev and the headless
+self-test the updater is not wired (no `app-update.yml`), so the banner stays
+hidden.
 
 Architecture: a sandboxed renderer (no Node access) draws the UI; the Electron
 main process owns the window, native dialogs, and an IPC broker; a long-lived

@@ -13,14 +13,25 @@
 /** Command keys each tab owns. Ids match CAPABILITIES entries. */
 export const TAB_COMMAND_KEYS: Record<string, readonly string[]> = {
   fork: ["fork:prepare", "fork"],
-  git: ["git", "templates:read", "templates:write", "templates:reset", "ignore-dirty:list", "ignore-dirty:set"],
+  git: ["git", "ignore-dirty:list", "ignore-dirty:set"],
   mcp: ["mcp:project-status", "mcp"],
   packages: ["packages", "packages:resolve-source", "packages:list", "packages:remove"],
   settings: ["config:prepare", "config", "doctor"],
 };
 
-/** Keys reachable regardless of selection (self-test + shared pickers). */
-export const SHARED_COMMAND_KEYS: readonly string[] = ["ping", "projects:discover"];
+/**
+ * Keys reachable regardless of selection: the transport self-test, the shared
+ * project picker, and the per-feature template editor (owned by neither tab —
+ * reachable from both the Git-setup ops and the Fork merge-attributes field, so
+ * a subset build that drops one tab must not strip it from the other).
+ */
+export const SHARED_COMMAND_KEYS: readonly string[] = [
+  "ping",
+  "projects:discover",
+  "templates:read",
+  "templates:write",
+  "templates:reset",
+];
 
 /**
  * Drop every key owned by a tab that `enabledIds` does not include. Keys not

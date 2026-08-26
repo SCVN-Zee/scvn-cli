@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { invokeForResult } from "@/lib/bridge";
+import { cn } from "@/lib/utils";
 import type { EditableTemplateKey, TemplateContent } from "@shared/commands";
 
 export interface TemplateEditorViewProps {
@@ -22,12 +23,13 @@ export interface TemplateEditorViewProps {
   onBack: () => void;
 }
 
-type StatusKind = "info" | "error" | "success";
+type StatusKind = "info" | "error" | "success" | "warning";
 
 const STATUS_CLASS: Record<StatusKind, string> = {
   info: "text-muted-foreground",
   error: "text-destructive",
   success: "text-success",
+  warning: "text-warning",
 };
 
 function errorMessage(err: unknown): string {
@@ -67,7 +69,10 @@ export function TemplateEditorView(props: TemplateEditorViewProps): React.JSX.El
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setStatus({ text: `Failed to load: ${errorMessage(err)}`, kind: "error" });
+        setStatus({
+          text: `Failed to load: ${errorMessage(err)}`,
+          kind: "error",
+        });
       });
 
     return () => {
@@ -79,7 +84,10 @@ export function TemplateEditorView(props: TemplateEditorViewProps): React.JSX.El
     if (!loaded) return;
     setSaving(true);
     try {
-      await invokeForResult("templates:write", { key: templateKey, content: value });
+      await invokeForResult("templates:write", {
+        key: templateKey,
+        content: value,
+      });
       setLoaded((prev) => (prev ? { ...prev, content: value, isOverridden: true } : prev));
       setStatus({
         text: "Saved. This override is now used by the CLI and GUI.",
@@ -114,53 +122,71 @@ export function TemplateEditorView(props: TemplateEditorViewProps): React.JSX.El
   }
 
   const overridden = loaded?.isOverridden === true;
+  const dirty = loaded != null && value !== loaded.content;
+  const busy = saving || resetting;
 
   return (
-    <Card className="mx-auto flex h-full w-full max-w-4xl flex-col">
-      <CardHeader className="gap-3">
-        <div>
-          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-            <ArrowLeft />
-            Back
-          </Button>
-        </div>
-        <div className="flex items-center gap-3">
-          <CardTitle>{label}</CardTitle>
-          <Badge variant={overridden ? "success" : "muted"}>{overridden ? "override" : "default"}</Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
-        <Textarea
-          className="min-h-[360px] flex-1 font-mono text-xs"
-          spellCheck={false}
-          aria-label={`${label} template content`}
-          disabled={!loaded}
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-        />
-        <p role="status" className={STATUS_CLASS[status.kind]}>
-          {status.text}
-        </p>
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            disabled={!loaded || value === loaded.content || saving}
-            onClick={() => void handleSave()}
-          >
-            <Save />
-            Save override
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!loaded || !loaded.isOverridden || resetting}
-            onClick={() => void handleReset()}
-          >
-            <RotateCcw />
-            Reset to default
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+    <div className="mx-auto flex h-full w-full max-w-4xl flex-col p-6">
+      <Card className="flex min-h-0 flex-1 flex-col gap-4">
+        <CardHeader className="gap-3">
+          <div>
+            <Button type="button" variant="ghost" size="sm" className="-ml-2" onClick={onBack}>
+              <ArrowLeft />
+              Back
+            </Button>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <CardTitle className="font-mono text-base">{label}</CardTitle>
+            <Badge variant={overridden ? "success" : "muted"}>
+              {overridden ? "override" : "default"}
+            </Badge>
+            {dirty ? (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-warning">
+                <span className="size-1.5 rounded-full bg-warning" />
+                Unsaved
+              </span>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
+          <Textarea
+            className="min-h-[360px] flex-1 resize-none rounded-lg bg-background/60 px-4 py-3 font-mono text-[13px] leading-relaxed shadow-none inset-shadow-sm"
+            style={{ tabSize: 2 }}
+            spellCheck={false}
+            aria-label={`${label} template content`}
+            disabled={!loaded}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+          />
+          <div className="-mx-6 flex items-center justify-between gap-4 border-t border-border px-6 pt-4">
+            <p
+              role="status"
+              className={cn("text-sm transition-colors duration-150", STATUS_CLASS[status.kind])}
+            >
+              {status.text}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!loaded || !loaded.isOverridden || busy}
+                onClick={() => void handleReset()}
+              >
+                <RotateCcw />
+                {resetting ? "Resetting…" : "Reset to default"}
+              </Button>
+              <Button
+                type="button"
+                disabled={!loaded || !dirty || busy}
+                onClick={() => void handleSave()}
+              >
+                <Save />
+                {saving ? "Saving…" : "Save override"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

@@ -79,7 +79,21 @@ describe("templates host handlers", () => {
 
   it("write rejects a non-editable template key", async () => {
     await expect(templatesWrite(null, { key: "editorconfig", content: "x" })).rejects.toThrow(/not an editable/i);
-    await expect(templatesWrite(null, { key: "gitattributesMerge", content: "x" })).rejects.toThrow(/not an editable/i);
+  });
+
+  it("gitattributesMerge is now editable (write + read round-trip)", async () => {
+    const before = (await templatesRead(null, { key: "gitattributesMerge" })) as TemplateContent;
+    expect(before.filename).toBe("gitattributes-merge");
+    expect(before.isOverridden).toBe(false);
+    expect(before.defaultContent.length).toBeGreaterThan(0);
+
+    await templatesWrite(null, { key: "gitattributesMerge", content: "*.unity merge=custom\n" });
+    const after = (await templatesRead(null, { key: "gitattributesMerge" })) as TemplateContent;
+    expect(after.isOverridden).toBe(true);
+    expect(after.content).toBe("*.unity merge=custom\n");
+    expect(await readFile(path.join(getTemplatesOverrideDir(), "gitattributes-merge"), "utf8")).toBe(
+      "*.unity merge=custom\n",
+    );
   });
 
   it("read rejects a non-editable template key", async () => {

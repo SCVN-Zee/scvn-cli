@@ -100,8 +100,12 @@ export type LaunchValues = Record<string, string | boolean | string[] | undefine
 // Editable git-artifact templates (per-feature inline editor)
 // ---------------------------------------------------------------------------
 
-/** The three git artifacts editable inline from the Git setup feature. */
-export type EditableTemplateKey = "gitignore" | "gitexclude" | "gitattributesLfs";
+/** The four git artifacts editable inline (Git setup ops + the Fork merge block). */
+export type EditableTemplateKey =
+  | "gitignore"
+  | "gitexclude"
+  | "gitattributesLfs"
+  | "gitattributesMerge";
 
 /**
  * The set the host accepts for read/write/reset. Keys match the CLI TemplateKey
@@ -112,6 +116,7 @@ export const EDITABLE_TEMPLATE_KEYS: EditableTemplateKey[] = [
   "gitignore",
   "gitexclude",
   "gitattributesLfs",
+  "gitattributesMerge",
 ];
 
 /** Effective + bundled-default content for one template (read handler payload). */

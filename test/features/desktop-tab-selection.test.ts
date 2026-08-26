@@ -67,9 +67,12 @@ describe("selectRegistry", () => {
 
   it("drops keys owned by disabled tabs but keeps shared + enabled keys", () => {
     const out = selectRegistry(fakeRegistry, ["fork"]);
+    // templates:read is shared (Git ops + Fork merge field), so it survives a
+    // subset build that disables the Git tab — never stripped from the survivor.
     expect(Object.keys(out).sort()).toEqual(
-      ["fork", "fork:prepare", "ping", "projects:discover"].sort(),
+      ["fork", "fork:prepare", "ping", "projects:discover", "templates:read"].sort(),
     );
+    expect(out["templates:read"]).toBe("git");
     // Disabled tabs' commands are gone → dispatcher returns UnknownCommand.
     expect(out["git"]).toBeUndefined();
     expect(out["config"]).toBeUndefined();

@@ -4,8 +4,8 @@
 
 import {
   Cable,
+  ForkKnife,
   GitBranch,
-  GitFork,
   Package,
   Settings,
   Boxes,
@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 const CAP_ICONS: Record<string, LucideIcon> = {
-  fork: GitFork,
+  fork: ForkKnife,
   git: GitBranch,
   mcp: Cable,
   packages: Package,

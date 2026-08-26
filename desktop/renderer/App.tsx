@@ -22,11 +22,12 @@ import { PackagesView } from "@/views/packages-view";
 import { McpView } from "@/views/mcp-view";
 import { TemplateEditorView } from "@/views/template-editor";
 
-/** Concise editor titles per editable artifact (owned by the Git feature). */
+/** Concise editor titles per editable artifact (Git ops + the Fork merge block). */
 const ARTIFACT_LABELS: Record<EditableTemplateKey, string> = {
   gitignore: ".gitignore",
   gitexclude: ".git/info/exclude",
   gitattributesLfs: "Git LFS (.gitattributes)",
+  gitattributesMerge: "Unity merge (.gitattributes)",
 };
 
 type Route =
@@ -122,10 +123,10 @@ export function App() {
         ) : selected.page === "mcp" ? (
           <McpView key={selected.id} onRun={onRun} />
         ) : (
-          <CapabilityForm key={selected.id} spec={selected} onRun={onRun} />
+          <CapabilityForm key={selected.id} spec={selected} onRun={onRun} onEditTemplate={onEditTemplate} />
         )
       ) : (
-        <p className="p-6 text-sm text-muted-foreground">No capabilities registered.</p>
+        <p className="p-6 text-sm text-muted-foreground">No tools registered.</p>
       )}
     </AppShell>
   );

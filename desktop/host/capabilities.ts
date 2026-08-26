@@ -24,6 +24,7 @@ import { DEFAULT_ADDONS } from "../../src/features/mcp/mcp-constants.js";
 import { isInstalled, markerVersion } from "../../src/features/mcp/marker.js";
 import { listStagedVersions, writeCacheDir } from "../../src/features/mcp/resolve-mcp-cache.js";
 import { templatesRead, templatesWrite, templatesReset } from "./templates.js";
+import { setupMergeAttributes } from "../../src/features/setup/setup-merge-attributes.js";
 import { loadConfig } from "../../src/config/load.js";
 import type { CommandRegistry } from "./dispatcher.js";
 import type { HostSession } from "./session.js";
@@ -92,7 +93,7 @@ export const capabilities: CommandRegistry = {
   async "fork:prepare"(): Promise<unknown> {
     let pre: ForkPreflight;
     try {
-      pre = await forkPreflight();
+      pre = await forkPreflight({ requireBeyondCompare: false });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       return {
@@ -115,9 +116,37 @@ export const capabilities: CommandRegistry = {
       default: pre.unityVersions[0]!.editorPath,
       options: pre.unityVersions.map((v) => ({ value: v.editorPath, label: `${v.version}  (${v.editorPath})` })),
     };
+    // Beyond Compare diff-tool setup is optional. Default on when BC is present,
+    // off when absent — turning it on without BC installed surfaces the honest
+    // "Beyond Compare not found" block at Apply.
+    const setupBcField: LaunchField = {
+      name: "setupBeyondCompare",
+      label: "Configure Beyond Compare (diff tool)",
+      type: "boolean",
+      default: pre.beyondComparePath !== null,
+    };
+    // Optional git-side half: write the Unity smart-merge `.gitattributes`
+    // block to a chosen project. Off by default (Fork prefs are machine-level;
+    // this one touches a repo). The pen edits the `gitattributes-merge`
+    // template inline, same as the Git-setup ops.
+    const applyMergeField: LaunchField = {
+      name: "applyMergeAttributes",
+      label: "Also write Unity merge .gitattributes to a project",
+      type: "boolean",
+      default: false,
+      templateKey: "gitattributesMerge",
+    };
+    const mergeTargetField: LaunchField = {
+      name: "mergeTarget",
+      label: "Merge-attributes target project",
+      type: "project",
+      visibleWhen: { field: "applyMergeAttributes", equals: "true" },
+    };
     return {
-      note: `Beyond Compare @ ${pre.beyondComparePath} · writes Fork.app prefs`,
-      fields: [editorField],
+      note: pre.beyondComparePath !== null
+        ? `Beyond Compare @ ${pre.beyondComparePath} · writes Fork.app prefs`
+        : "Beyond Compare not found · the Unity merge tool is still configured",
+      fields: [editorField, setupBcField, applyMergeField, mergeTargetField],
     } satisfies FormModel;
   },
 
@@ -126,14 +155,37 @@ export const capabilities: CommandRegistry = {
     const output = createGuiOutput(session);
     const prompt = createGuiPrompt(session);
 
-    const pre = await forkPreflight();
+    const setupBeyondCompare = bool(record, "setupBeyondCompare");
+    const pre = await forkPreflight({ requireBeyondCompare: setupBeyondCompare });
     if (!pre.ok) {
       output.log.error(pre.blocker ?? "Prerequisites not met");
       return { ok: false };
     }
     const editorPath = str(record, "editorPath") ?? pre.unityVersions[0]!.editorPath;
     const picked = pre.unityVersions.find((v) => v.editorPath === editorPath) ?? pre.unityVersions[0]!;
-    return forkExecute({ yamlMergePath: picked.yamlMergePath, dryRun: false }, prompt, output);
+    const result = await forkExecute({ yamlMergePath: picked.yamlMergePath, dryRun: false, setupBeyondCompare }, prompt, output);
+
+    // Optional git-side half: apply the Unity smart-merge `.gitattributes`
+    // block to the chosen project. Failures here are surfaced but do not undo
+    // the Fork prefs write above.
+    if (bool(record, "applyMergeAttributes")) {
+      const target = str(record, "mergeTarget");
+      if (!target) {
+        output.log.warn("Merge attributes: no target project selected — skipped");
+      } else {
+        try {
+          const merge = await setupMergeAttributes(target);
+          if (merge.status === "skipped") {
+            output.log.warn(`Merge attributes skipped: ${merge.detail}`);
+          } else {
+            output.log.success(`Merge attributes: ${merge.detail}`);
+          }
+        } catch (err: unknown) {
+          output.log.error(`Merge attributes failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+    return result;
   },
 
   async git(session: HostSession, args: unknown): Promise<unknown> {

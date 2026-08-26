@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { execa } from "execa";
+import { readFileSync } from "node:fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -8,9 +9,12 @@ const BIN = path.resolve(__dirname, "../bin/scvn");
 
 describe("scvn smoke", () => {
   it("prints version", async () => {
+    const pkg = JSON.parse(
+      readFileSync(path.resolve(__dirname, "../package.json"), "utf8"),
+    ) as { version: string };
     const { stdout, exitCode } = await execa(BIN, ["--version"]);
     expect(exitCode).toBe(0);
-    expect(stdout.trim()).toBe("0.5.0");
+    expect(stdout.trim()).toBe(pkg.version);
   });
 
   it("prints help with -h", async () => {

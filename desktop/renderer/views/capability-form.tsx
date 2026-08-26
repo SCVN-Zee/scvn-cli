@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { FolderOpen, LoaderCircle, TriangleAlert } from "lucide-react";
+import { FolderOpen, LoaderCircle, Pencil, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -21,11 +21,13 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { invokeForResult, pickDirectory } from "@/lib/bridge";
-import type { CapabilitySpec, FormModel, LaunchField, LaunchValues } from "@shared/commands";
+import type { CapabilitySpec, EditableTemplateKey, FormModel, LaunchField, LaunchValues } from "@shared/commands";
 
 export interface CapabilityFormProps {
   spec: CapabilitySpec;
   onRun: (capabilityId: string, values: LaunchValues) => void;
+  /** Open the inline editor for a field's template (boolean fields with a templateKey). */
+  onEditTemplate?: (key: EditableTemplateKey) => void;
 }
 
 type LoadState =
@@ -78,7 +80,7 @@ function fieldDomId(name: string): string {
 }
 
 export function CapabilityForm(props: CapabilityFormProps): React.JSX.Element {
-  const { spec, onRun } = props;
+  const { spec, onRun, onEditTemplate } = props;
   const activeIdRef = useRef(spec.id);
   activeIdRef.current = spec.id;
 
@@ -135,9 +137,16 @@ export function CapabilityForm(props: CapabilityFormProps): React.JSX.Element {
     };
   }, [spec.id, spec.form, spec.launch, spec.label]);
 
-  const visibleFields = fields.filter(
-    (field) => !field.visibleWhen || values[field.visibleWhen.field] === field.visibleWhen.equals,
-  );
+  const visibleFields = fields.filter((field) => {
+    if (!field.visibleWhen) return true;
+    const current = values[field.visibleWhen.field];
+    // visibleWhen.equals is a string; a boolean controller (toggle) is compared
+    // by its stringified value ("true"/"false") so a Switch can gate a field.
+    return (
+      current === field.visibleWhen.equals ||
+      (typeof current === "boolean" && String(current) === field.visibleWhen.equals)
+    );
+  });
 
   const run = (): void => {
     if (blocker !== undefined) return;
@@ -184,6 +193,7 @@ export function CapabilityForm(props: CapabilityFormProps): React.JSX.Element {
                   field={field}
                   value={values[field.name]}
                   onChange={(value) => setFieldValue(field.name, value)}
+                  onEditTemplate={onEditTemplate}
                 />
               ))}
               <Button type="button" disabled={blocker !== undefined} onClick={run}>
@@ -206,16 +216,31 @@ function LaunchFieldControl(props: {
   field: LaunchField;
   value: string | boolean | string[] | undefined;
   onChange: (value: string | boolean | string[]) => void;
+  onEditTemplate?: (key: EditableTemplateKey) => void;
 }): React.JSX.Element {
-  const { field, value, onChange } = props;
+  const { field, value, onChange, onEditTemplate } = props;
   const id = fieldDomId(field.name);
 
   switch (field.type) {
     case "boolean": {
+      const templateKey = field.templateKey;
       return (
         <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5">
           <Label htmlFor={id}>{field.label}</Label>
-          <Switch id={id} checked={value === true} onCheckedChange={(next) => onChange(next)} />
+          <div className="flex shrink-0 items-center gap-1.5">
+            {templateKey && onEditTemplate ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`Edit ${field.label} template`}
+                onClick={() => onEditTemplate(templateKey)}
+              >
+                <Pencil />
+              </Button>
+            ) : null}
+            <Switch id={id} checked={value === true} onCheckedChange={(next) => onChange(next)} />
+          </div>
         </div>
       );
     }

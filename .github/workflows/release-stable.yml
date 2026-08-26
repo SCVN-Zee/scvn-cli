@@ -1,20 +1,28 @@
-# STABLE release. A `v<version>` tag (e.g. v0.5.0) produces the signed +
-# notarized macOS build with the MCP tab HIDDEN and publishes it to GitHub
-# Releases with the electron-updater metadata (latest-mac.yml + zip + blockmaps)
-# that shipped copies use to self-update.
+# STABLE release. A `v<version>` tag (e.g. v0.5.0) builds the macOS app with the
+# MCP tab HIDDEN and publishes the dmg + zip to GitHub Releases.
+#
+# Signing is tiered (shared script build-sign-publish.sh), best available first:
+#   1. Apple Developer ID + notarization   (CSC_LINK secret)       — no first-run
+#      Gatekeeper friction; auto-updates.
+#   2. Stable self-signed cert              (SCVN_SELFSIGN_P12)     — auto-updates
+#      WITHOUT an Apple account; first run opens via right-click→Open.
+#   3. Ad-hoc fallback                      (no secrets)            — opens via
+#      right-click→Open but CANNOT auto-update.
+# The electron-updater manifest (latest-mac.yml), .zip, and blockmaps are KEPT
+# for tiers 1–2 (signed=true) so the app auto-updates; the ad-hoc tier prunes
+# them (Squirrel.Mac would reject the update) — see the prune step below.
 #
 # Env split by tag, NOT by branch push (nothing runs on push to dev/main):
-#   - v<version> release (no prerelease id)  → this workflow      (stable, signed, MCP hidden)
-#   - v<version> with a prerelease id (v*-*) → release-beta.yml   (beta,  unsigned, MCP visible)
+#   - v<version> release (no prerelease id)  → this workflow      (stable, MCP hidden)
+#   - v<version> with a prerelease id (v*-*) → release-beta.yml   (beta,   MCP hidden)
 # The `!v*-*` line below keeps semver prerelease tags off this workflow —
 # without it, `v*` would also match `v0.6.0-beta.1` and double-fire.
 #
-# Required repository secrets (macOS signing + notarization; see README):
-#   CSC_LINK                    base64 of the Developer ID Application .p12
-#   CSC_KEY_PASSWORD            password for that .p12
-#   APPLE_ID                    Apple ID email (notarization)
-#   APPLE_APP_SPECIFIC_PASSWORD app-specific password for APPLE_ID
-#   APPLE_TEAM_ID               Apple Developer Team ID
+# Optional repository secrets:
+#   Tier 1 (Apple Developer ID + notarization):
+#     CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
+#   Tier 2 (self-signed auto-update; generate via .github/scripts/gen-selfsign-cert.sh):
+#     SCVN_SELFSIGN_P12 (base64 .p12), SCVN_SELFSIGN_PASSWORD
 # GITHUB_TOKEN (auto) publishes the release; contents:write is granted below.
 
 name: release-stable
@@ -68,41 +76,40 @@ jobs:
               --title "$GITHUB_REF_NAME" \
               --notes "Automated release $GITHUB_REF_NAME."
 
-      - name: Build, sign/notarize when secrets present, and publish
+      - name: Build, sign, and publish
+        id: build
         env:
           # Hide the MCP tab in the shipped build (every tab except mcp).
           SCVN_TABS: fork,git,packages,settings
-          # Code signing (Developer ID Application) — empty string when unset.
+          # Tier 1 — Apple Developer ID (empty string when the secret is unset).
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          # Notarization (notarytool via Apple ID).
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Tier 2 — stable self-signed cert (auto-update without an Apple account).
+          SCVN_SELFSIGN_P12: ${{ secrets.SCVN_SELFSIGN_P12 }}
+          SCVN_SELFSIGN_PASSWORD: ${{ secrets.SCVN_SELFSIGN_PASSWORD }}
           # Publish the release + updater metadata to this repo.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [ -z "$CSC_LINK" ]; then
-            echo "::warning::No signing certificate (CSC_LINK) configured — building UNSIGNED. The published app opens only via right-click→Open on macOS and will NOT auto-update. Add the signing secrets for a real, auto-updatable release."
-            # electron-builder treats a DEFINED-but-empty CSC_LINK as an explicit
-            # cert (→ "not a file") and would try to notarize with empty creds.
-            # Unset them so it behaves like the unsigned local `desktop:pack`.
-            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
-            export CSC_IDENTITY_AUTO_DISCOVERY=false
-          fi
-          npm run desktop:publish
+        # Tiered signing (Developer ID -> self-signed -> ad-hoc) + `signed` output.
+        run: bash .github/scripts/build-sign-publish.sh stable
 
-      # Trim the release page to the meaningful assets. latest-mac.yml + the zip
-      # MUST stay — electron-updater reads them to self-update shipped copies.
-      # The blockmaps are only a differential-download optimization; without
-      # them the updater falls back to a full zip download, so they can go.
-      - name: Prune blockmaps from the release
+      # Auto-update plumbing (latest-mac.yml, .zip, and the differential-download
+      # blockmaps) is kept when the build is signed — Developer ID OR the stable
+      # self-signed cert, both of which Squirrel.Mac accepts for updates. Only the
+      # ad-hoc fallback (signed=false) cannot self-update, so strip its manifest to
+      # avoid a broken "update available → install fails" prompt; keep the dmg,
+      # .zip, and GitHub's auto-added source archives.
+      - name: Prune updater plumbing when the build is unsigned
+        if: steps.build.outputs.signed != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "Ad-hoc/unsigned build cannot self-update; removing latest-mac.yml + blockmaps so users are not shown a broken update prompt."
           for asset in $(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name'); do
             case "$asset" in
-              *.blockmap)
+              *.blockmap|latest-mac.yml)
                 echo "Deleting $asset"
                 gh release delete-asset "$GITHUB_REF_NAME" "$asset" --yes ;;
             esac

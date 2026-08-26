@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import { execa } from "execa";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpDir } from "../helpers/tmp-dir.js";
 import { setupGitexclude } from "../../src/features/setup/setup-gitexclude.js";
 import { getGitInfoExcludePath } from "../../src/services/git.js";
@@ -40,6 +41,20 @@ async function makeRepo(): Promise<{ target: string; excludePath: string }> {
 async function templateBody(): Promise<string> {
   const file = await resolveTemplateKey("gitexclude");
   return (await readFile(file, "utf8")).replace(/\n+$/, "");
+}
+
+/**
+ * A retired pre-fence template body, frozen as a fixture (so it survives future
+ * template edits). `v0.5.1` is the pre-trim body verbatim; `v0.5` is that body
+ * plus the `UnityMcp**` line the mcp path used before the mcp fence. Their
+ * sha256s are the entries in RETIRED_TEMPLATE_DIGESTS.
+ */
+async function retiredBody(rev: "v0.5.1" | "v0.5"): Promise<string> {
+  const file = fileURLToPath(new URL("../fixtures/git-exclude-v0.5.1.txt", import.meta.url));
+  const base = await readFile(file, "utf8");
+  return rev === "v0.5"
+    ? base.replace("Voxel Labs**\n", "Voxel Labs**\nUnityMcp**\n")
+    : base;
 }
 
 function count(text: string, needle: string): number {
@@ -93,7 +108,7 @@ describe("setupGitexclude", () => {
     expect(text).not.toContain("build/# >>> scvn >>>");
   });
 
-  it("migrates a byte-equal legacy template to the fenced form without duplicating patterns", async () => {
+  it("migrates a byte-equal current template to the fenced form without duplicating it", async () => {
     const { target, excludePath } = await makeRepo();
     const templatePath = await resolveTemplateKey("gitexclude");
     await writeFile(excludePath, await readFile(templatePath, "utf8"), "utf8");
@@ -102,26 +117,40 @@ describe("setupGitexclude", () => {
     const text = await readFile(excludePath, "utf8");
 
     expect(text).toBe(`# >>> scvn >>>\n${await templateBody()}\n# <<< scvn <<<\n`);
-    expect(count(text, "vFolders**")).toBe(1);
+    expect(count(text, ".mcp.json")).toBe(1);
     expect(count(text, "UnityMcp")).toBe(0);
   });
 
-  it("migrates the v0.5 template revision too, dropping its UnityMcp** line", async () => {
-    // Every pre-fence install carries THIS revision, not the current one: the
-    // shipped template listed `UnityMcp**` until the mcp fence took over that
-    // path. Left unrecognized it would take the additive path, duplicating the
-    // body and stranding an unfenced `UnityMcp**` no strip can ever remove.
+  it("migrates the retired v0.5.1 pre-trim revision to the fenced current form", async () => {
+    // A pre-fence install carries a wholesale copy of whatever template its scvn
+    // shipped. The v0.5.1 body (before the lean-defaults trim) must still be
+    // recognized by digest, or it falls to the additive path and strands the old
+    // unfenced body forever.
     const { target, excludePath } = await makeRepo();
-    const current = await readFile(await resolveTemplateKey("gitexclude"), "utf8");
-    const v05 = current.replace("Voxel Labs**\n", "Voxel Labs**\nUnityMcp**\n");
-    expect(v05).not.toBe(current); // guard: the anchor line still exists
+    await writeFile(excludePath, await retiredBody("v0.5.1"), "utf8");
+
+    await setupGitexclude(target, {});
+    const text = await readFile(excludePath, "utf8");
+
+    // Exact-match proves wholesale replacement: an additive path would leave the
+    // old body in place and this equality would fail.
+    expect(text).toBe(`# >>> scvn >>>\n${await templateBody()}\n# <<< scvn <<<\n`);
+    expect(count(text, "UnityMcp")).toBe(0);
+  });
+
+  it("migrates the retired v0.5 revision too, dropping its UnityMcp** line", async () => {
+    // v0.5 = the v0.5.1 body plus a `UnityMcp**` line (the mcp path predating the
+    // mcp fence). Left unrecognized, that line would keep matching Assets/UnityMCP
+    // even after `scvn mcp uninstall`.
+    const { target, excludePath } = await makeRepo();
+    const v05 = await retiredBody("v0.5");
+    expect(v05).toContain("UnityMcp**\n"); // guard: fixture carries the retired line
     await writeFile(excludePath, v05, "utf8");
 
     await setupGitexclude(target, {});
     const text = await readFile(excludePath, "utf8");
 
     expect(text).toBe(`# >>> scvn >>>\n${await templateBody()}\n# <<< scvn <<<\n`);
-    expect(count(text, "vFolders**")).toBe(1);
     expect(count(text, "UnityMcp")).toBe(0);
   });
 

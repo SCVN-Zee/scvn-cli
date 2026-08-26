@@ -13,6 +13,7 @@ are identical by construction; this checklist is the guard that proves it.
 | `config` | `test/desktop/host-dispatch.test.ts` → "GUI adapter parity with the CLI" | GUI-written `~/.scvn/config` is **byte-identical** to the CLI-written file; the dir prompt carries `kind: "dir"` so main opens the native picker. |
 | `config` (form) | `test/commands/config.test.ts` → "runConfigExecute() — GUI form write half" | The form's write half validates + persists exactly like the CLI loop's tail. |
 | `fork` | `test/commands/fork.test.ts` → `forkPreflight()` / `forkExecute()` | Preflight blockers + the prefs write match the CLI flow; `runFork` still composes them unchanged. |
+| `fork` merge attrs | `test/features/setup-merge-attributes.test.ts` | The Fork form's optional "write Unity merge `.gitattributes`" step reuses the CLI writer `writeGitAttributes()` via `setupMergeAttributes` (`src/features/setup/`); the host forks no write logic — it only resolves the picked project and toggle. |
 | `setup` | `test/commands/shared/select-setup-target.test.ts` | The form's discovery step returns the same project list the CLI picker uses. |
 | routing | `test/desktop/host-dispatch.test.ts` → "registry exposes form prepare/execute routes" | Every form capability has a `prepare` + execute route; guided ones do not. |
 

@@ -649,7 +649,7 @@ describe("fence coexistence with `scvn git --exclude`", () => {
     expect(text.split("# >>> scvn mcp >>>").length - 1).toBe(1);
     expect(text.split("# >>> scvn >>>").length - 1).toBe(1);
     expect(text).toContain("/Assets/UnityMCP/");
-    expect(text).toContain("vFolders**");
+    expect(text).toContain("CLAUDE.md"); // scvn template body present
     expect(await porcelain(repo)).toBe("");
   });
 
@@ -666,7 +666,7 @@ describe("fence coexistence with `scvn git --exclude`", () => {
 
     expect(text).not.toContain("# >>> scvn mcp >>>");
     expect(text).toContain("# >>> scvn >>>");
-    expect(text).toContain("vFolders**");
+    expect(text).toContain("CLAUDE.md"); // scvn template block survives mcp uninstall
   });
 
   it("migrates a repo the retired bash script wired: its fence is replaced, not duplicated", async () => {

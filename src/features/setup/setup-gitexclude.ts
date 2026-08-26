@@ -39,8 +39,11 @@ import type { SyncReporter } from "../transfer/reporter.js";
  * file never matches, so it always takes the additive path.
  */
 const RETIRED_TEMPLATE_DIGESTS: readonly string[] = [
-  // v0.5 — identical to the current template plus a `UnityMcp**` line.
+  // v0.5 — the v0.5.1 pre-trim body (below) plus a `UnityMcp**` line.
   "b76ab88e734724934fb56f7481b28166bd05872b0955d765302e50ae1f560beb",
+  // v0.5.1 — pre-trim revision (vPlugins / Others / docs-plans sections),
+  // retired when templates/git-exclude was trimmed to lean defaults.
+  "a9239c21d02d2c8cf9801a1d3110ab04e6df6584d55677d2a8628444f62803a8",
 ];
 
 export interface SetupGitexcludeOpts {

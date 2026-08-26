@@ -1,6 +1,6 @@
 {
   "name": "scvn",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -26,7 +26,11 @@
     "desktop:pack": "npm run desktop:build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --config electron-builder.yml --publish never",
     "desktop:release": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish never",
     "desktop:publish": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always",
-    "desktop:publish:beta": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always -c.publish.releaseType=prerelease -c.mac.notarize=false"
+    "desktop:publish:selfsigned": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always -c.mac.identity=- -c.mac.sign=desktop/build/sign.cjs -c.mac.notarize=false -c.mac.hardenedRuntime=false",
+    "desktop:publish:adhoc": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false",
+    "desktop:publish:beta": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always -c.publish.releaseType=prerelease",
+    "desktop:publish:beta:selfsigned": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always -c.publish.releaseType=prerelease -c.mac.identity=- -c.mac.sign=desktop/build/sign.cjs -c.mac.notarize=false -c.mac.hardenedRuntime=false",
+    "desktop:publish:beta:adhoc": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always -c.publish.releaseType=prerelease -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false"
   },
   "dependencies": {
     "@clack/prompts": "^1.5.1",

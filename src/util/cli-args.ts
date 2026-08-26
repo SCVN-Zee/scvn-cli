@@ -44,6 +44,8 @@ export interface ParsedArgs {
   force: boolean;
   /** `--purge-nuget` — also remove Assets/Plugins/NuGet (`scvn mcp uninstall`) */
   purgeNuget: boolean;
+  /** `--no-beyond-compare` — skip configuring Beyond Compare as Fork's diff tool (`scvn fork`); default true */
+  beyondCompare: boolean;
   /** Namespace token if the first positional matched a known namespace */
   namespace: string | null;
   /** Positional subcommand tokens after the namespace (or all positionals if no namespace) */
@@ -84,6 +86,7 @@ export function parseArgv(argv: string[]): ParsedArgs {
   let lfs = false;
   let force = false;
   let purgeNuget = false;
+  let beyondCompare = true;
   let namespace: string | null = null;
   let from: string | undefined;
   let target: string | undefined;
@@ -149,6 +152,10 @@ export function parseArgv(argv: string[]): ParsedArgs {
       case "--purge-nuget":
         purgeNuget = true;
         continue;
+
+      case "--no-beyond-compare":
+        beyondCompare = false;
+        continue;
     }
 
     if (VALUE_FLAGS.has(arg)) {
@@ -193,7 +200,7 @@ export function parseArgv(argv: string[]): ParsedArgs {
   return {
     help, version, dryRun, autoYes,
     ignore, exclude, lfs,
-    force, purgeNuget,
+    force, purgeNuget, beyondCompare,
     namespace, subcommands,
     from, to, target, store, addons,
     warnings,

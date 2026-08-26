@@ -1,7 +1,7 @@
 # BETA release. A semver PRERELEASE tag `v<version>` where <version> carries a
-# prerelease id (e.g. v0.6.0-beta.1) produces an UNSIGNED macOS build with the
-# MCP tab VISIBLE and publishes it to GitHub Releases as a PRE-RELEASE for
-# internal testers.
+# prerelease id (e.g. v0.6.0-beta.1) builds the macOS app with the MCP tab
+# HIDDEN (same tab set as stable) and publishes it to GitHub Releases as a
+# PRE-RELEASE for internal testers.
 #
 # Why semver prerelease and not a `b` suffix: electron-builder derives the
 # GitHub release tag from package.json `version` (v${version}), NOT from the git
@@ -10,11 +10,15 @@
 # `v0.5.0` draft; `0.6.0-beta.1` derives the matching `v0.6.0-beta.1` tag.
 #
 # Env split by tag, NOT by branch push (nothing runs on push to dev/main):
-#   - v<version> with a prerelease id (v*-*) → this workflow   (beta,  unsigned, MCP visible)
-#   - v<version> release (no prerelease id)  → release-stable.yml (stable, signed, MCP hidden)
+#   - v<version> with a prerelease id (v*-*) → this workflow    (beta,   MCP hidden)
+#   - v<version> release (no prerelease id)  → release-stable.yml (stable, MCP hidden)
 #
-# Unsigned by design: no signing/notarization secrets are read here, so the beta
-# app opens via right-click→Open on macOS and does NOT auto-update.
+# Signing is tiered (shared with the stable workflow): Apple Developer ID when
+# its secrets are set, else the stable self-signed cert (SCVN_SELFSIGN_P12) which
+# lets betas auto-update to newer betas WITHOUT an Apple account, else an ad-hoc
+# fallback that opens via right-click→Open but cannot auto-update. Beta testers
+# get prerelease updates automatically: electron-updater enables allowPrerelease
+# for an app whose own version is a prerelease.
 name: release-beta
 
 on:
@@ -33,10 +37,8 @@ jobs:
   beta:
     runs-on: macos-14 # electron-builder --mac must run on macOS
     env:
-      # Internal build env: show every tab, including MCP.
-      SCVN_TABS: fork,git,packages,settings,mcp
-      # Force an unsigned build (no Developer ID cert, no notarization).
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # Ship the same tab set as stable — the MCP tab is hidden here too.
+      SCVN_TABS: fork,git,packages,settings
     steps:
       - uses: actions/checkout@v4
 
@@ -74,21 +76,33 @@ jobs:
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" --prerelease \
-              --title "$GITHUB_REF_NAME (beta)" \
-              --notes "Automated UNSIGNED beta $GITHUB_REF_NAME. Opens via right-click→Open on macOS; does not auto-update."
-
-      - name: Build (unsigned, MCP visible) and publish pre-release
+              --title "$GITHUB_REF_NAME" \
+              --notes "Automated beta $GITHUB_REF_NAME (macOS arm64). First run may need right-click→Open; updates apply automatically when the build is signed."
+      - name: Build, sign, and publish pre-release
+        id: build
         env:
+          # Tier 1 — Apple Developer ID (empty string when the secret is unset).
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Tier 2 — stable self-signed cert (auto-update without an Apple account).
+          SCVN_SELFSIGN_P12: ${{ secrets.SCVN_SELFSIGN_P12 }}
+          SCVN_SELFSIGN_PASSWORD: ${{ secrets.SCVN_SELFSIGN_PASSWORD }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run desktop:publish:beta
+        # Tiered signing (Developer ID -> self-signed -> ad-hoc) + `signed` output.
+        run: bash .github/scripts/build-sign-publish.sh beta
 
-      # Beta is unsigned and never auto-updates, so the updater manifest and the
-      # differential-download blockmaps are dead weight on the release page.
-      # Leave only the dmg, zip, and GitHub's auto-added source archives.
-      - name: Prune updater plumbing from the release
+      # Keep updater plumbing only when the build is signed (Developer ID or the
+      # stable self-signed cert); an ad-hoc fallback can't self-update, so strip
+      # its manifest/blockmaps and leave only the dmg, zip, and source archives.
+      - name: Prune updater plumbing when the build is unsigned
+        if: steps.build.outputs.signed != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "Ad-hoc build cannot self-update; removing latest-mac.yml + blockmaps."
           for asset in $(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name'); do
             case "$asset" in
               *.blockmap|latest-mac.yml)

@@ -36,6 +36,14 @@ describe("parseArgv — flags", () => {
     expect(parseArgv(["--version"]).version).toBe(true);
   });
 
+  it("defaults beyondCompare to true", () => {
+    expect(parseArgv(["fork"]).beyondCompare).toBe(true);
+  });
+
+  it("parses --no-beyond-compare as beyondCompare=false", () => {
+    expect(parseArgv(["fork", "--no-beyond-compare"]).beyondCompare).toBe(false);
+  });
+
   it("silently ignores unknown flags", () => {
     const r = parseArgv(["--unknown-flag", "sync"]);
     expect(r.namespace).toBe("sync");
@@ -122,6 +130,7 @@ describe("parseArgv — namespace extraction", () => {
       lfs: false,
       force: false,
       purgeNuget: false,
+      beyondCompare: true,
       namespace: null,
       subcommands: [],
       from: undefined,

@@ -190,6 +190,7 @@ try {
     await runFork({
       dryRun:  args.dryRun,
       autoYes: args.autoYes,
+      beyondCompare: args.beyondCompare,
     });
 
   } else if (SETUP_OPS[firstSub] === true) {

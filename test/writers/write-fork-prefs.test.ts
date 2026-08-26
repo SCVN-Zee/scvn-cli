@@ -37,6 +37,7 @@ describe("writeForkPrefs", () => {
     const r = await writeForkPrefs({
       yamlMergePath:
         "/Applications/Unity/Hub/Editor/2022.3.16f1/Unity.app/Contents/Tools/UnityYAMLMerge",
+      setupBeyondCompare: true,
     });
     expect(r.mergePathWritten).toBe(
       "/Applications/Unity/Hub/Editor/2022.3.16f1/Unity.app/Contents/Tools/UnityYAMLMerge",
@@ -64,8 +65,19 @@ describe("writeForkPrefs", () => {
     ]);
   });
 
+  it("with setupBeyondCompare=false: skips externalDiffTool, still writes mergeTool", async () => {
+    await writeForkPrefs({ yamlMergePath: "/tmp/unity", setupBeyondCompare: false });
+    const keys = execaMock.mock.calls
+      .map((c) => c as unknown as [string, string[]])
+      .filter(([cmd, args]) => cmd === "defaults" && args[0] === "write")
+      .map(([, args]) => args[2]);
+    expect(keys).not.toContain("externalDiffTool");
+    expect(keys).toContain("mergeTool");
+    expect(keys).toContain("externalMergeToolCustomPath");
+  });
+
   it("deletes legacy + stale diff-custom keys", async () => {
-    await writeForkPrefs({ yamlMergePath: "/tmp/unity" });
+    await writeForkPrefs({ yamlMergePath: "/tmp/unity", setupBeyondCompare: true });
     const deleted = execaMock.mock.calls
       .map((c) => c as unknown as [string, string[]])
       .filter(([cmd, args]) => cmd === "defaults" && args[0] === "delete")
@@ -81,7 +93,7 @@ describe("writeForkPrefs", () => {
   });
 
   it("quits Fork and flushes cfprefsd cache", async () => {
-    await writeForkPrefs({ yamlMergePath: "/tmp/unity" });
+    await writeForkPrefs({ yamlMergePath: "/tmp/unity", setupBeyondCompare: true });
     const calls = execaMock.mock.calls.map(
       (c) => c as unknown as [string, string[]],
     );

@@ -33,6 +33,13 @@ coverage/
 .env.local
 .env.*.local
 
+# Code-signing keys/certs — NEVER commit. Store the .p12 in a password manager
+# and set it as the SCVN_SELFSIGN_P12 repo secret (see .github/scripts/gen-selfsign-cert.sh).
+*.p12
+*.pem
+*.cer
+*.mobileprovision
+
 # Temp
 *.tmp
 .cache/

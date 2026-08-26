@@ -107,7 +107,7 @@ export function Sidebar({ items, selectedId, onSelect, collapsed, onToggle }: Si
       <nav className="min-h-0 flex-1 overflow-y-auto p-2">
         {!collapsed && (
           <p className="px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Capabilities
+            Tools
           </p>
         )}
         <ul className="flex flex-col gap-0.5">

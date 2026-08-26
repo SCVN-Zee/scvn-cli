@@ -214,6 +214,15 @@ describe("runFork()", () => {
     );
     expect(process.exitCode).not.toBe(1);
   });
+
+  it("beyondCompare:false with BC absent: writes prefs (no diff), no abort", async () => {
+    detectMocks.detectBeyondCompare.mockResolvedValue({ found: false, path: "" });
+    await runFork({ beyondCompare: false, autoYes: true }, fakePrompt([]));
+    expect(writerMocks.writeForkPrefs).toHaveBeenCalledWith(
+      expect.objectContaining({ setupBeyondCompare: false }),
+    );
+    expect(process.exitCode).not.toBe(1);
+  });
 });
 
 describe("forkPreflight()", () => {
@@ -252,6 +261,13 @@ describe("forkPreflight()", () => {
     expect(pre.blocker).toMatch(/Beyond Compare not found/);
   });
 
+  it("requireBeyondCompare:false — a missing Beyond Compare is not a blocker", async () => {
+    detectMocks.detectBeyondCompare.mockResolvedValue({ found: false, path: "" });
+    const pre = await forkPreflight({ requireBeyondCompare: false });
+    expect(pre.ok).toBe(true);
+    expect(pre.beyondComparePath).toBeNull();
+  });
+
   it("no Unity → blocker", async () => {
     detectMocks.detectUnityVersions.mockResolvedValue([]);
     const pre = await forkPreflight();
@@ -267,7 +283,7 @@ describe("forkExecute()", () => {
   });
 
   it("applies: writes Fork prefs with the given yamlMergePath, returns ok + backup", async () => {
-    const result = await forkExecute({ yamlMergePath: UNITY[1]!.yamlMergePath, dryRun: false }, fakePrompt([]));
+    const result = await forkExecute({ yamlMergePath: UNITY[1]!.yamlMergePath, dryRun: false, setupBeyondCompare: true }, fakePrompt([]));
     expect(writerMocks.writeForkPrefs).toHaveBeenCalledWith(
       expect.objectContaining({ yamlMergePath: UNITY[1]!.yamlMergePath }),
     );
@@ -276,15 +292,22 @@ describe("forkExecute()", () => {
   });
 
   it("dry-run: no writer call, still ok", async () => {
-    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: true }, fakePrompt([]));
+    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: true, setupBeyondCompare: true }, fakePrompt([]));
     expect(writerMocks.writeForkPrefs).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
   });
 
   it("writer failure: returns ok:false with the error message", async () => {
     writerMocks.writeForkPrefs.mockRejectedValue(new Error("defaults write failed"));
-    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: false }, fakePrompt([]));
+    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: false, setupBeyondCompare: true }, fakePrompt([]));
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/defaults write failed/);
+  });
+
+  it("setupBeyondCompare=false: threads the flag to the writer", async () => {
+    await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: false, setupBeyondCompare: false }, fakePrompt([]));
+    expect(writerMocks.writeForkPrefs).toHaveBeenCalledWith(
+      expect.objectContaining({ setupBeyondCompare: false }),
+    );
   });
 });

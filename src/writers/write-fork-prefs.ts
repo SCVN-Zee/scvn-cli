@@ -54,6 +54,8 @@ const LEGACY_CUSTOM_KEYS = [
 
 export interface ForkPrefsInput {
   yamlMergePath: string;
+  /** When true, set Fork's diff tool to Beyond Compare; when false, leave the diff pref untouched. */
+  setupBeyondCompare: boolean;
 }
 
 export interface ForkPrefsResult {
@@ -104,9 +106,13 @@ export async function writeForkPrefs(
 
   const backupPath = await backupFile(FORK_PLIST);
 
-  // Diff: Fork's built-in beyondCompare enum auto-discovers Beyond Compare via bundle id.
-  // Precheck guarantees Beyond Compare is installed — no fallback needed here.
-  await writeInt(KEYS.diffSelector, FORK_TOOL_ENUM.beyondCompare);
+  // Diff: Fork's built-in beyondCompare enum auto-discovers Beyond Compare via
+  // bundle id. Only written when the caller opted in — when skipped, any
+  // existing externalDiffTool pref is left untouched (skip ≠ reset). The
+  // preflight guarantees Beyond Compare is installed whenever this runs.
+  if (input.setupBeyondCompare) {
+    await writeInt(KEYS.diffSelector, FORK_TOOL_ENUM.beyondCompare);
+  }
 
   // Merge: explicit custom path pointing at the user-picked Unity's YAMLMerge.
   // Arguments MUST be written as a plist array (one argv per element); Fork

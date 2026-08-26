@@ -32,7 +32,7 @@ describe("HELP_TEXT — flags match the parser", () => {
   it("documents every flag the parser actually accepts", () => {
     for (const flag of [
       "--dry-run", "--yes", "--from", "--to", "--target", "--store",
-      "--addons", "--force", "--purge-nuget",
+      "--addons", "--force", "--purge-nuget", "--no-beyond-compare",
       "--ignore", "--exclude", "--lfs", "--help", "--version",
     ]) {
       expect(HELP_TEXT).toContain(flag);
@@ -49,6 +49,7 @@ describe("HELP_TEXT — flags match the parser", () => {
       const known =
         parsed.help || parsed.version || parsed.dryRun || parsed.autoYes ||
         parsed.ignore || parsed.exclude || parsed.lfs || parsed.force || parsed.purgeNuget ||
+        parsed.beyondCompare === false ||
         parsed.from !== undefined || parsed.to.length > 0 ||
         parsed.target !== undefined || parsed.store !== undefined ||
         parsed.addons !== undefined;
