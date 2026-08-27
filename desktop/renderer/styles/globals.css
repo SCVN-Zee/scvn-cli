@@ -149,3 +149,34 @@
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* Onboarding card entrance. A rare, one-shot mount (first run or replay) —
+   standard animation is appropriate: fade + 8px rise under 300ms with a
+   strong ease-out so motion is visible in the first frames. Never scales
+   from 0. Reduced motion: fade only, no positional movement. */
+@keyframes onboarding-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.onboarding-card {
+  animation: onboarding-in 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-card {
+    animation: onboarding-fade 160ms ease-out;
+  }
+}
+
+@keyframes onboarding-fade {
+  from {
+    opacity: 0;
+  }
+}

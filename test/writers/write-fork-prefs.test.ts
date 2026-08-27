@@ -6,15 +6,20 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { execaMock } = vi.hoisted(() => ({
+const { execaMock, quitMock } = vi.hoisted(() => ({
   execaMock: vi.fn(async (_cmd: string, _args: string[]) => ({
     exitCode: 0,
     stdout: "",
     stderr: "",
   })),
+  quitMock: vi.fn(async () => "not-running" as const),
 }));
 
 vi.mock("execa", () => ({ execa: execaMock }));
+vi.mock("../../src/lib/quit-fork.js", () => ({
+  quitForkApp: quitMock,
+  FORK_QUIT_TIMEOUT_MESSAGE: "Fork did not quit in time — quit Fork manually and re-run.",
+}));
 
 import {
   FORK_TOOL_ENUM,
@@ -31,7 +36,11 @@ describe("FORK_TOOL_ENUM (observed Fork 2.66.6 rawValues)", () => {
 });
 
 describe("writeForkPrefs", () => {
-  beforeEach(() => execaMock.mockClear());
+  beforeEach(() => {
+    execaMock.mockClear();
+    quitMock.mockClear();
+    quitMock.mockResolvedValue("not-running");
+  });
 
   it("sets externalDiffTool=beyondCompare(1), mergeTool=custom(8), custom path + array args", async () => {
     const r = await writeForkPrefs({
@@ -92,21 +101,31 @@ describe("writeForkPrefs", () => {
     );
   });
 
-  it("quits Fork and flushes cfprefsd cache", async () => {
+  it("waits for Fork to be gone (quit-and-wait) and flushes cfprefsd cache", async () => {
+    quitMock.mockResolvedValue("quit");
     await writeForkPrefs({ yamlMergePath: "/tmp/unity", setupBeyondCompare: true });
+    expect(quitMock).toHaveBeenCalledOnce();
+    // The fire-and-forget osascript quit is gone — quitting is quit-fork's job.
     const calls = execaMock.mock.calls.map(
       (c) => c as unknown as [string, string[]],
     );
     expect(
-      calls.some(
-        ([cmd, args]) =>
-          cmd === "osascript" &&
-          args[0] === "-e" &&
-          args[1]?.includes('quit app "Fork"'),
-      ),
-    ).toBe(true);
+      calls.some(([cmd, args]) => cmd === "osascript" && args[0] === "-e"),
+    ).toBe(false);
     expect(
       calls.some(([cmd, args]) => cmd === "killall" && args[0] === "cfprefsd"),
     ).toBe(true);
+  });
+
+  it("quit timeout: throws BEFORE any defaults write or backup", async () => {
+    quitMock.mockResolvedValue("timeout");
+    await expect(
+      writeForkPrefs({ yamlMergePath: "/tmp/unity", setupBeyondCompare: true }),
+    ).rejects.toThrow(/quit Fork manually/);
+    expect(
+      execaMock.mock.calls.some(
+        (c) => (c as unknown as [string, string[]])[0] === "defaults",
+      ),
+    ).toBe(false);
   });
 });

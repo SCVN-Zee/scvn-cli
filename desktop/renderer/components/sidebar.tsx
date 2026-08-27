@@ -8,7 +8,7 @@
  * the shell so a topbar button and a keyboard shortcut can drive the same state.
  */
 
-import { ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, CircleHelp } from "lucide-react";
 
 import logoUrl from "@/assets/logo.png";
 
@@ -28,6 +28,8 @@ export interface SidebarProps {
   onSelect: (id: string) => void;
   collapsed: boolean;
   onToggle: () => void;
+  /** Reopen the first-run setup guide (the "?" footer button). */
+  onReplaySetup: () => void;
 }
 
 function NavItem({
@@ -72,9 +74,9 @@ function NavItem({
   );
 }
 
-export function Sidebar({ items, selectedId, onSelect, collapsed, onToggle }: SidebarProps) {
-  const mainItems = items.filter((i) => i.id !== "settings");
+export function Sidebar({ items, selectedId, onSelect, collapsed, onToggle, onReplaySetup }: SidebarProps) {
   const settingsItem = items.find((i) => i.id === "settings");
+  const mainItems = items.filter((i) => i.id !== "settings");
   return (
     <aside
       data-collapsed={collapsed}
@@ -142,6 +144,20 @@ export function Sidebar({ items, selectedId, onSelect, collapsed, onToggle }: Si
             />
           </div>
         )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onReplaySetup}
+              aria-label="Replay setup"
+              className="size-8 shrink-0 text-muted-foreground hover:text-sidebar-accent-foreground"
+            >
+              <CircleHelp className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Replay setup</TooltipContent>
+        </Tooltip>
         <Button
           variant="ghost"
           size="icon"

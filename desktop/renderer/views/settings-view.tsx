@@ -22,6 +22,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { invokeForResult, pickDirectory } from "@/lib/bridge";
+import {
+  cancelQueuedConfigSave,
+  enqueueConfigSave,
+  subscribeConfigSaved,
+  type ConfigSaveOwner,
+} from "@/lib/config-save-queue";
 import { logLineClass, useHostRun } from "@/lib/use-host-run";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +38,7 @@ const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "";
 
 export function SettingsView(): React.JSX.Element {
   return (
-    <div className="mx-auto w-full max-w-[720px] p-6">
+    <div className="mx-auto w-full max-w-4xl p-6">
       <Tabs defaultValue="config">
         <TabsList>
           <TabsTrigger value="config">Config</TabsTrigger>
@@ -59,12 +65,18 @@ const STATUS_CLASS: Record<StatusKind, string> = {
   error: "text-destructive",
   success: "text-success",
 };
-
 function ConfigPanel(): React.JSX.Element {
   const [projectsRoot, setProjectsRoot] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ text: string; kind: StatusKind } | null>(null);
+  const lastSavedRoot = useRef<string | null>(null);
+  const saveOwner = useRef<ConfigSaveOwner>({});
+  const saveSeq = useRef(0);
+  const pendingSaves = useRef(0);
+  const dirty = useRef(false);
+  const latestExternalRoot = useRef<string | null>(null);
+  const pickerPending = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,7 +84,10 @@ function ConfigPanel(): React.JSX.Element {
       .then((raw) => {
         if (cancelled) return;
         const model = raw as { fields: { name: string; default?: string }[] };
-        setProjectsRoot(model.fields.find((f) => f.name === "projectsRoot")?.default ?? "");
+        const root = latestExternalRoot.current ??
+          (model.fields.find((f) => f.name === "projectsRoot")?.default ?? "");
+        lastSavedRoot.current = root.trim();
+        if (!dirty.current) setProjectsRoot(root);
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -85,24 +100,71 @@ function ConfigPanel(): React.JSX.Element {
     };
   }, []);
 
-  async function save(): Promise<void> {
-    setSaving(true);
-    setStatus(null);
+  useEffect(() => {
+    return subscribeConfigSaved((root) => {
+      latestExternalRoot.current = root;
+      if (dirty.current || pendingSaves.current > 0) return;
+      lastSavedRoot.current = root;
+      setProjectsRoot(root);
+      setStatus({ text: "Saved.", kind: "success" });
+    });
+  }, []);
+
+  async function saveRoot(root: string, seq: number): Promise<void> {
+    pendingSaves.current += 1;
     try {
-      await invokeForResult("config", { projectsRoot });
+      const outcome = await enqueueConfigSave(root, saveOwner.current);
+      if (outcome.kind === "superseded" || saveSeq.current !== seq) return;
+      const raw = outcome.value as { ok?: boolean; error?: string };
+      if (raw?.ok !== true) {
+        setStatus({ text: raw?.error ?? "Could not save the projects root", kind: "error" });
+        return;
+      }
+      lastSavedRoot.current = root;
+      dirty.current = false;
       setStatus({ text: "Saved.", kind: "success" });
     } catch (err: unknown) {
-      setStatus({ text: err instanceof Error ? err.message : String(err), kind: "error" });
+      if (saveSeq.current === seq) {
+        setStatus({ text: err instanceof Error ? err.message : String(err), kind: "error" });
+      }
     } finally {
-      setSaving(false);
+      pendingSaves.current -= 1;
+      setSaving(pendingSaves.current > 0);
     }
+  }
+
+  function commitRoot(value: string): void {
+    const root = value.trim();
+    if (root === "") {
+      saveSeq.current += 1;
+      cancelQueuedConfigSave(saveOwner.current);
+      dirty.current = true;
+      setStatus({ text: "Enter a projects root before saving.", kind: "error" });
+      setSaving(pendingSaves.current > 0);
+      return;
+    }
+    const persistedRoot = latestExternalRoot.current ?? lastSavedRoot.current;
+    if (!dirty.current && root === persistedRoot) {
+      lastSavedRoot.current = persistedRoot;
+      dirty.current = false;
+      return;
+    }
+
+    dirty.current = true;
+    const seq = ++saveSeq.current;
+    setSaving(true);
+    setStatus(null);
+    void saveRoot(root, seq);
   }
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Config</CardTitle>
-        <CardDescription>Set the Unity projects root used by the project pickers.</CardDescription>
+        <CardDescription>
+          Set the Unity projects root used by the project pickers. Changes save automatically when you leave this
+          field or press Enter.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {loading ? (
@@ -122,15 +184,45 @@ function ConfigPanel(): React.JSX.Element {
                   className="flex-1"
                   value={projectsRoot}
                   placeholder="/path/to/your/Unity/Projects"
-                  onChange={(event) => setProjectsRoot(event.target.value)}
+                  onChange={(event) => {
+                    dirty.current = true;
+                    saveSeq.current += 1;
+                    setProjectsRoot(event.target.value);
+                    setStatus(null);
+                  }}
+                  onBlur={(event) => {
+                    if (!pickerPending.current) commitRoot(event.currentTarget.value);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      commitRoot(event.currentTarget.value);
+                    }
+                  }}
                 />
                 <Button
                   type="button"
                   variant="outline"
+                  onMouseDown={() => {
+                    pickerPending.current = true;
+                  }}
                   onClick={() => {
-                    void pickDirectory({ kind: "dir", title: "Unity projects root" }).then((picked) => {
-                      if (picked !== null) setProjectsRoot(picked);
-                    });
+                    pickerPending.current = true;
+                    void pickDirectory({ kind: "dir", title: "Unity projects root" })
+                      .then((picked) => {
+                        if (picked === null) return;
+                        dirty.current = true;
+                        saveSeq.current += 1;
+                        setProjectsRoot(picked);
+                        setStatus(null);
+                        commitRoot(picked);
+                      })
+                      .catch((err: unknown) => {
+                        setStatus({ text: err instanceof Error ? err.message : String(err), kind: "error" });
+                      })
+                      .finally(() => {
+                        pickerPending.current = false;
+                      });
                   }}
                 >
                   <FolderOpen />
@@ -138,11 +230,20 @@ function ConfigPanel(): React.JSX.Element {
                 </Button>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Button type="button" disabled={saving} onClick={() => void save()}>
-                {saving ? "Saving…" : "Save"}
-              </Button>
-              {status ? <span className={cn("text-sm", STATUS_CLASS[status.kind])}>{status.text}</span> : null}
+            <div className="flex items-center gap-3" aria-live="polite">
+              {saving ? (
+                <span className="text-sm text-muted-foreground" role="status">
+                  Saving…
+                </span>
+              ) : null}
+              {status ? (
+                <span
+                  className={cn("text-sm", STATUS_CLASS[status.kind])}
+                  role={status.kind === "error" ? "alert" : "status"}
+                >
+                  {status.text}
+                </span>
+              ) : null}
             </div>
           </>
         )}

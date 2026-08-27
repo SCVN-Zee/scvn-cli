@@ -5,6 +5,7 @@
  *   install    vendor into a project + write .mcp.json
  *   uninstall  remove the vendored source (+ optionally the NuGet DLLs)
  *   update     bump an installed project (an older version = offline rollback)
+ *   reconfigure  change an installed project's addon set atomically
  *
  * Bare `scvn mcp` prints the usage hint and exits 1 — the `scvn git` precedent,
  * not the `scvn packages` verb menu. The mutating verbs each target a specific
@@ -28,16 +29,18 @@ import { expandAddonCsv } from "../features/mcp/addon-names.js";
 import { installMcp } from "../features/mcp/install-mcp.js";
 import { uninstallMcp } from "../features/mcp/uninstall-mcp.js";
 import { updateMcp } from "../features/mcp/update-mcp.js";
+import { reconfigureMcp } from "../features/mcp/reconfigure-mcp.js";
 
-export type McpVerb = "status" | "install" | "uninstall" | "update";
+export type McpVerb = "status" | "install" | "uninstall" | "update" | "reconfigure";
 
-const VERBS = new Set<string>(["status", "install", "uninstall", "update"]);
+const VERBS = new Set<string>(["status", "install", "uninstall", "update", "reconfigure"]);
 
 export const MCP_USAGE_HINT = `scvn mcp needs a verb:
   scvn mcp status                          staged versions + per-project install state (offline)
   scvn mcp install [<coreVer>] [--addons a,b]  vendor Unity-MCP into a project + write .mcp.json
   scvn mcp uninstall [--purge-nuget]       remove the vendored source
   scvn mcp update [<coreVer>]              bump an installed project (an older version = offline rollback)
+  scvn mcp reconfigure [--addons a,b]      re-vendor an installed project to a new addon set
 Version: omitted → the newest core every selected addon has a build for. Name one to override.
 Target: --target <Assets dir> | SCVN_TARGET | interactive picker (-y requires an explicit --target).`;
 
@@ -98,7 +101,7 @@ export async function runMcp(
   // is already staged (a bundle), or fetch the default seed when nothing is.
   // Materializing the seed here would look like a typed --addons and force a
   // fetch on exactly the machine that cannot do one.
-  if (verb === "install" && addons === undefined && !args.autoYes) {
+  if ((verb === "install" || verb === "reconfigure") && addons === undefined && !args.autoYes) {
     addons = await selectMcpAddons(prompt);
   }
 
@@ -118,6 +121,14 @@ export async function runMcp(
             ...shared,
             coreVersion: args.version,
             addons,
+            force: args.force ?? false,
+          });
+        }
+        if (verb === "reconfigure") {
+          return reconfigureMcp({
+            ...shared,
+            addons,
+            coreVersion: args.version,
             force: args.force ?? false,
           });
         }

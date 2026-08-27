@@ -66,13 +66,17 @@ Bare `scvn packages` opens a verb menu.
 #### How `add` picks a package
 
 `add` opens a folder picker (a path prompt in the CLI, a native dialog in the
-desktop app). Pick any folder **inside a Unity project's `Assets/`** — its
-Assets-relative path is preserved, so a plugin at `…/ProjA/Assets/Plugins/Sirenix`
-is stored under that path and `import` restores it to `Assets/Plugins/Sirenix` in
-the target. The folder's paired Unity `.meta` sidecar is copied alongside it.
+desktop app). Pick any folder **inside a Unity project** — under `Assets/`, an
+embedded UPM package under `Packages/`, or a custom root-level folder. Its
+project-root-relative path is preserved, so a plugin at
+`…/ProjA/Assets/Plugins/Sirenix` is stored under that path and `import`
+restores it to `Assets/Plugins/Sirenix` in the target, while
+`…/ProjA/Packages/com.acme.core` restores to `Packages/com.acme.core`. The
+folder's paired Unity `.meta` sidecar is copied alongside it.
 
-Picking the `Assets/` folder itself, or a folder outside any `Assets/` tree, is
-rejected with a reason. Re-adding the same path updates its entry in place.
+Picking the `Assets/`, `Packages/`, or `ProjectSettings/` folder itself, the
+project root, or a folder outside any Unity project is rejected with a reason.
+Re-adding the same path updates its entry in place.
 
 ### `scvn mcp` — vendor Unity-MCP as `Assets/` source
 
@@ -153,6 +157,23 @@ Each bootstrap op is a top-level command:
 |---|---|
 | `scvn ignore-dirty` | Toggle `ignore=dirty` on the repo's git submodules (multi-select) |
 | `scvn fork` | Configure Fork 2.64 for Unity merges (macOS only) |
+
+### `scvn init` — Supercent directory hierarchy
+
+Creates directories below an existing Unity `Assets/` folder. The default is
+`Assets/Supercent/<ProjectName>/` with Animation, Audio, Configs, Models, Fonts,
+Materials, Prefabs, Scenes, Scripts, Shaders, Sprites, and Textures folders.
+
+```sh
+scvn init --target ~/Projects/Game/Assets --name Combat -y
+scvn init --target ~/Projects/Game/Assets --layout layout.json -n
+```
+
+`--layout` accepts full Assets-relative paths, for example
+`{ "directories": ["Custom", "Custom/Demo", "Custom/Demo/Scenes"] }`.
+`--name` generates the default hierarchy and cannot be combined with `--layout`.
+Existing directories are preserved; existing files, duplicate paths, and unsafe
+paths fail before creation. `-n` prints the plan without writing.
 
 Target resolution: `--target <Assets dir>` flag → `SCVN_TARGET` env →
 interactive picker. Under `-y` an explicit target is required — ops never
@@ -411,9 +432,9 @@ existing installs will refuse the update:
 ```
 
 `GITHUB_TOKEN` (built-in) publishes the release. The published build hides the
-MCP tab via `SCVN_TABS=fork,git,packages,settings` (baked into the renderer
+MCP tab via `SCVN_TABS=fork,git,packages,init,settings` (baked into the renderer
 catalog and host registry); build that variant locally by prefixing any desktop
-script, e.g. `SCVN_TABS=fork,git,packages,settings npm run desktop:pack`.
+script, e.g. `SCVN_TABS=fork,git,packages,init,settings npm run desktop:pack`.
 
 Shipped copies self-update via `electron-updater`: the update banner checks the
 GitHub Release on launch and, when a newer version exists, offers **Download

@@ -80,7 +80,7 @@ jobs:
         id: build
         env:
           # Hide the MCP tab in the shipped build (every tab except mcp).
-          SCVN_TABS: fork,git,packages,settings
+          SCVN_TABS: fork,git,packages,init,settings
           # Tier 1 — Apple Developer ID (empty string when the secret is unset).
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}

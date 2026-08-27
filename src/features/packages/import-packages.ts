@@ -1,5 +1,8 @@
 /**
- * features/packages/import-packages.ts — Apply staged packages to ONE target.
+ * features/packages/import-packages.ts — Apply staged packages to ONE target
+ * (the target project ROOT: relPaths are project-root-relative, so an
+ * Assets/... package lands under the target's Assets/ and a Packages/...
+ * package lands under its Packages/).
  *
  * The command layer owns target selection, the summary confirm, and the
  * multi-target loop. This handler copies each staged package (+ sidecar)
@@ -24,18 +27,23 @@ import type { StagedPackage } from "../store/store-meta.js";
 import { copyPackage } from "./copy-package.js";
 
 /**
- * Find .meta files in target whose counterpart is missing in target itself
- * (true dangling sidecars). Top-level scan, matching the v0.1 cleanup scope.
+ * Find .meta files whose counterpart is missing in the scanned tree itself
+ * (true dangling sidecars). Scans the target project root AND its Assets/
+ * top level: with project-root-relative identities the target is the project
+ * root, so the root scan covers root-level packages (e.g. Packages/) and the
+ * Assets scan preserves the v0.1 cleanup scope for Assets packages.
  */
 async function findDanglingMetas(target: string): Promise<string[]> {
   const dangling: string[] = [];
+  const scanRoots = [target, path.join(target, "Assets")];
   try {
-    const entries = await readdir(target, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".meta")) continue;
-      const base = entry.name.slice(0, -5); // strip .meta
-      if (!(await exists(path.join(target, base)))) {
-        dangling.push(path.join(target, entry.name));
+    for (const scanRoot of scanRoots) {
+      for (const entry of await readdir(scanRoot, { withFileTypes: true })) {
+        // Directories named *.meta are ignored (withFileTypes): only real
+        // sidecar FILES without their counterpart asset are dangling.
+        if (!entry.isFile() || !entry.name.endsWith(".meta")) continue;
+        if (await exists(path.join(scanRoot, entry.name.slice(0, -".meta".length)))) continue;
+        dangling.push(path.join(scanRoot, entry.name));
       }
     }
   } catch {

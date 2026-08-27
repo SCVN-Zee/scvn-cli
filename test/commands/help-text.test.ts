@@ -31,7 +31,7 @@ describe("HELP_TEXT — commands", () => {
 describe("HELP_TEXT — flags match the parser", () => {
   it("documents every flag the parser actually accepts", () => {
     for (const flag of [
-      "--dry-run", "--yes", "--from", "--to", "--target", "--store",
+      "--dry-run", "--yes", "--from", "--to", "--target", "--store", "--name", "--layout",
       "--addons", "--force", "--purge-nuget", "--no-beyond-compare",
       "--ignore", "--exclude", "--lfs", "--help", "--version",
     ]) {
@@ -52,7 +52,7 @@ describe("HELP_TEXT — flags match the parser", () => {
         parsed.beyondCompare === false ||
         parsed.from !== undefined || parsed.to.length > 0 ||
         parsed.target !== undefined || parsed.store !== undefined ||
-        parsed.addons !== undefined;
+        parsed.addons !== undefined || parsed.name !== undefined || parsed.layout !== undefined;
       return !known;
     });
 

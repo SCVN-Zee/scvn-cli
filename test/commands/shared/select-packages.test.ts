@@ -26,9 +26,12 @@ function fakePrompt(multiselect: string[]): PromptAdapter {
 
 const meta = {
   kind: "packages",
+  version: 2,
   packages: [
-    { label: "vFolders",       relPath: "vFolders",        bytes: 1 },
-    { label: "Odin Inspector", relPath: "Plugins/Sirenix", bytes: 2 },
+    { label: "vFolders",       relPath: "Assets/vFolders",        bytes: 1 },
+    { label: "Odin Inspector", relPath: "Assets/Plugins/Sirenix", bytes: 2 },
+    { label: "Foo",            relPath: "Packages/Foo",           bytes: 3 },
+    { label: "Foo",            relPath: "Assets/Foo",             bytes: 4 },
   ],
 } as PackagesStoreMeta;
 
@@ -38,40 +41,52 @@ describe("selectStagedPackages — import side", () => {
   });
 
   it("interactive → default all, returns the chosen subset", async () => {
-    const prompt = fakePrompt(["Odin Inspector"]);
+    const prompt = fakePrompt(["Assets/Plugins/Sirenix"]);
     const result = await selectStagedPackages(meta, false, prompt);
 
     expect(prompt.multiselect).toHaveBeenCalledWith(
-      expect.objectContaining({ initialValues: ["vFolders", "Odin Inspector"] }),
+      expect.objectContaining({
+        initialValues: [
+          "Assets/vFolders",
+          "Assets/Plugins/Sirenix",
+          "Packages/Foo",
+          "Assets/Foo",
+        ],
+        options: expect.arrayContaining([
+          expect.objectContaining({ value: "Assets/Plugins/Sirenix", label: "Odin Inspector" }),
+          expect.objectContaining({ value: "Packages/Foo", label: "Foo (Packages/Foo)" }),
+          expect.objectContaining({ value: "Assets/Foo", label: "Foo (Assets/Foo)" }),
+        ]),
+      }),
     );
-    expect(result).toEqual([{ label: "Odin Inspector", relPath: "Plugins/Sirenix", bytes: 2 }]);
+    expect(result).toEqual([{ label: "Odin Inspector", relPath: "Assets/Plugins/Sirenix", bytes: 2 }]);
   });
 
-  it("preselected labels skip the prompt entirely", async () => {
+  it("preselected relPaths skip the prompt entirely", async () => {
     const prompt = fakePrompt([]);
-    const result = await selectStagedPackages(meta, false, prompt, ["vFolders"]);
+    const result = await selectStagedPackages(meta, false, prompt, ["Assets/vFolders"]);
 
     expect(prompt.multiselect).not.toHaveBeenCalled();
-    expect(result).toEqual([{ label: "vFolders", relPath: "vFolders", bytes: 1 }]);
+    expect(result).toEqual([{ label: "vFolders", relPath: "Assets/vFolders", bytes: 1 }]);
   });
 });
 
 describe("selectStagedPackagesToRemove — remove side", () => {
   it("nothing preselected — the user opts each removal in", async () => {
-    const prompt = fakePrompt(["vFolders"]);
+    const prompt = fakePrompt(["Assets/vFolders"]);
     const result = await selectStagedPackagesToRemove(meta, prompt);
 
     expect(prompt.multiselect).toHaveBeenCalledWith(
       expect.objectContaining({ initialValues: [] }),
     );
-    expect(result).toEqual([{ label: "vFolders", relPath: "vFolders", bytes: 1 }]);
+    expect(result).toEqual([{ label: "vFolders", relPath: "Assets/vFolders", bytes: 1 }]);
   });
 
-  it("preselected labels skip the prompt entirely", async () => {
+  it("preselected relPaths skip the prompt entirely", async () => {
     const prompt = fakePrompt([]);
-    const result = await selectStagedPackagesToRemove(meta, prompt, ["Odin Inspector"]);
+    const result = await selectStagedPackagesToRemove(meta, prompt, ["Assets/Plugins/Sirenix"]);
 
     expect(prompt.multiselect).not.toHaveBeenCalled();
-    expect(result).toEqual([{ label: "Odin Inspector", relPath: "Plugins/Sirenix", bytes: 2 }]);
+    expect(result).toEqual([{ label: "Odin Inspector", relPath: "Assets/Plugins/Sirenix", bytes: 2 }]);
   });
 });

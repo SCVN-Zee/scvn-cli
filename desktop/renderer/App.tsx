@@ -20,7 +20,14 @@ import { GitView } from "@/views/git-view";
 import { SettingsView } from "@/views/settings-view";
 import { PackagesView } from "@/views/packages-view";
 import { McpView } from "@/views/mcp-view";
+import { InitView } from "@/views/init-view";
+import { OnboardingView } from "@/views/onboarding-view";
 import { TemplateEditorView } from "@/views/template-editor";
+import { Button } from "@/components/ui/button";
+import { invokeForResult } from "@/lib/bridge";
+import { LoaderCircle } from "lucide-react";
+
+import type { ConfigStatus } from "@shared/commands";
 
 /** Concise editor titles per editable artifact (Git ops + the Fork merge block). */
 const ARTIFACT_LABELS: Record<EditableTemplateKey, string> = {
@@ -34,6 +41,9 @@ type Route =
   | { kind: "form" }
   | { kind: "run"; command: string; args: unknown; title: string }
   | { kind: "editor"; key: EditableTemplateKey; label: string };
+
+/** First-run gate: probing → onboarding | app. */
+type BootPhase = "probing" | "onboarding" | "app";
 
 function readSelftest(): string | null {
   try {
@@ -53,7 +63,7 @@ const REVEAL_KEY = "scvn.tabs.revealHidden";
  * localStorage. `event.code === "Period"` is layout-robust — Shift+Period emits
  * ">" as `event.key` on many layouts. A no-op when the build ships every tab.
  */
-function useRevealHidden(): boolean {
+function useRevealHidden(shortcutsEnabled = true): boolean {
   const [revealed, setRevealed] = React.useState<boolean>(() => {
     try {
       return localStorage.getItem(REVEAL_KEY) === "1";
@@ -63,6 +73,7 @@ function useRevealHidden(): boolean {
   });
 
   React.useEffect(() => {
+    if (!shortcutsEnabled) return;
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === "Period") {
         event.preventDefault();
@@ -79,7 +90,7 @@ function useRevealHidden(): boolean {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [shortcutsEnabled]);
 
   return revealed;
 }
@@ -91,7 +102,53 @@ export function App() {
     selftest ? { kind: "run", command: selftest, args: undefined, title: selftest } : { kind: "form" },
   );
 
-  const revealed = useRevealHidden();
+  // Boot gate. The probe runs before the shell mounts so the main app never
+  // flashes before onboarding; ?selftest boots straight into its run and never
+  // gates. needsSetup drives the session banner after Skip/Finish.
+  const [phase, setPhase] = React.useState<BootPhase>(() => (selftest ? "app" : "probing"));
+  const [needsSetup, setNeedsSetup] = React.useState(false);
+  const [initDirty, setInitDirty] = React.useState(false);
+
+  React.useEffect(() => {
+    if (selftest) return;
+    let cancelled = false;
+    void invokeForResult("config:status")
+      .then((raw) => {
+        if (cancelled) return;
+        const ready = (raw as ConfigStatus).ready;
+        setNeedsSetup(!ready);
+        setPhase(ready ? "app" : "onboarding");
+      })
+      .catch(() => {
+        // A failed probe must not lock the user out of the app.
+        if (!cancelled) setPhase("app");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selftest]);
+  const setupStatusSeq = React.useRef(0);
+  const finishOnboarding = React.useCallback(() => {
+    const seq = ++setupStatusSeq.current;
+    setPhase("app");
+    // Refresh banner truth: finishing under an invalid env override stays
+    // not-ready (the onboarding notice already explained why).
+    void invokeForResult("config:status")
+      .then((raw) => {
+        if (setupStatusSeq.current === seq) setNeedsSetup(!(raw as ConfigStatus).ready);
+      })
+      .catch(() => undefined);
+  }, []);
+  const skipOnboarding = React.useCallback(() => {
+    setupStatusSeq.current += 1;
+    setPhase("app");
+  }, []);
+  const reopenOnboarding = React.useCallback(() => {
+    setupStatusSeq.current += 1;
+    setPhase("onboarding");
+  }, []);
+
+  const revealed = useRevealHidden(phase !== "onboarding");
   const items = React.useMemo(
     () => (revealed ? ALL_CAPABILITIES : CAPABILITIES),
     [revealed],
@@ -109,9 +166,12 @@ export function App() {
   );
 
   const selectCapability = React.useCallback((id: string) => {
+    if (id === selectedId) return;
+    if (initDirty && !window.confirm("Discard unsaved initializer changes?")) return;
+    setInitDirty(false);
     setSelectedId(id);
     setRoute({ kind: "form" });
-  }, []);
+  }, [initDirty, selectedId]);
 
   const onRun = React.useCallback(
     (capabilityId: string, values: LaunchValues) => {
@@ -147,8 +207,41 @@ export function App() {
         ? `Edit ${route.label}`
         : (selected?.label ?? "Supercent VN Tools");
 
+  if (phase === "probing") {
+    return (
+      <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+        <div className="app-drag h-8 shrink-0" />
+        <div className="flex flex-1 items-center justify-center" role="status" aria-label="Starting up">
+          <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    );
+  }
+
+  // Setup is a blocking modal over the regular shell. The selected route and
+  // banner stay mounted underneath so reopening never loses the user's place.
   return (
-    <AppShell items={items} selectedId={selectedId} onSelect={selectCapability} title={title}>
+    <AppShell
+      items={items}
+      selectedId={selectedId}
+      onSelect={selectCapability}
+      title={title}
+      banner={
+        needsSetup && phase === "app" ? (
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2">
+            <p className="text-xs text-muted-foreground">
+              The Unity projects root isn&apos;t set up yet — project pickers need it.
+            </p>
+            <Button type="button" size="sm" variant="outline" onClick={reopenOnboarding}>
+              Finish setup
+            </Button>
+          </div>
+        ) : null
+      }
+      onReplaySetup={reopenOnboarding}
+      setupOpen={phase === "onboarding"}
+      setup={<OnboardingView onDone={finishOnboarding} onSkip={skipOnboarding} />}
+    >
       {route.kind === "run" ? (
         <RunOpView
           key={route.command + JSON.stringify(route.args)}
@@ -173,6 +266,8 @@ export function App() {
           <PackagesView key={`${selected.id}:${pkgNonce}`} onRun={onRun} />
         ) : selected.page === "mcp" ? (
           <McpView key={selected.id} onRun={onRun} />
+        ) : selected.page === "init" ? (
+          <InitView key={selected.id} onDirtyChange={setInitDirty} />
         ) : (
           <CapabilityForm key={selected.id} spec={selected} onRun={onRun} onEditTemplate={onEditTemplate} />
         )

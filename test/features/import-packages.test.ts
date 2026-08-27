@@ -3,6 +3,10 @@
  *
  * rsync is mocked; store/target fixtures and the dangling-.meta cleanup run
  * against REAL tmp dirs so the rm path is exercised for real.
+ *
+ * The target is the project ROOT and staged relPaths are project-root-relative:
+ * Assets/... packages land under <target>/Assets/, Packages/... under
+ * <target>/Packages/.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -22,16 +26,15 @@ vi.mock("../../src/services/rsync.js", () => rsyncMocks);
 import { importPackages } from "../../src/features/packages/import-packages.js";
 
 const STAGED: StagedPackage[] = [
-  { label: "vFolders",       relPath: "vFolders",        bytes: 1 },
-  { label: "Odin Inspector", relPath: "Plugins/Sirenix", bytes: 1 },
+  { label: "vFolders",       relPath: "Assets/vFolders",        bytes: 1 },
+  { label: "Odin Inspector", relPath: "Assets/Plugins/Sirenix", bytes: 1 },
 ];
 
 function makeFakeReporter() {
   const statusEvents: SyncStatusEvent[] = [];
   const reporter: SyncReporter = {
-    onStatus(event) { statusEvents.push(event); },
-    onProgress()    { /* not asserted */ },
-    onLog()         { /* not asserted */ },
+    onStatus: (event) => { statusEvents.push(event); },
+    onLog:    () => {},
   };
   return { reporter, statusEvents };
 }
@@ -48,11 +51,11 @@ describe("importPackages", () => {
 
     root     = join(tmpdir(), `scvn-import-pkgs-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     storeDir = join(root, "store");
-    target   = join(root, "game", "Assets");
-    // Staged slot mirrors both packages
-    await mkdir(join(storeDir, "packages", "vFolders"), { recursive: true });
-    await mkdir(join(storeDir, "packages", "Plugins", "Sirenix"), { recursive: true });
-    await mkdir(target, { recursive: true });
+    target   = join(root, "game"); // the target project ROOT
+    // Staged slot mirrors both packages at their root-relative identity
+    await mkdir(join(storeDir, "packages", "Assets", "vFolders"), { recursive: true });
+    await mkdir(join(storeDir, "packages", "Assets", "Plugins", "Sirenix"), { recursive: true });
+    await mkdir(join(target, "Assets"), { recursive: true });
   });
 
   afterEach(async () => {
@@ -60,23 +63,36 @@ describe("importPackages", () => {
     vi.restoreAllMocks();
   });
 
-  it("applies every staged package store → target", async () => {
+  it("applies every staged package store → target at its root-relative location", async () => {
     const { reporter, statusEvents } = makeFakeReporter();
 
     await importPackages(target, STAGED, { reporter, storeDir });
 
     const streamCalls = rsyncMocks.rsyncCopyStream.mock.calls.map((c) => [c[0], c[1]]);
     expect(streamCalls).toEqual([
-      [`${join(storeDir, "packages", "vFolders")}/`,          `${join(target, "vFolders")}/`],
-      [`${join(storeDir, "packages", "Plugins", "Sirenix")}/`, `${join(target, "Plugins", "Sirenix")}/`],
+      [`${join(storeDir, "packages", "Assets", "vFolders")}/`,          `${join(target, "Assets", "vFolders")}/`],
+      [`${join(storeDir, "packages", "Assets", "Plugins", "Sirenix")}/`, `${join(target, "Assets", "Plugins", "Sirenix")}/`],
     ]);
     expect(statusEvents.at(-1)?.status).toBe("done");
     expect(statusEvents.at(-1)?.detail).toContain("2 package(s) applied");
   });
 
+  it("applies an outside-Assets package under the target's Packages/", async () => {
+    const { reporter } = makeFakeReporter();
+    await mkdir(join(storeDir, "packages", "Packages", "com.acme.core"), { recursive: true });
+    const staged: StagedPackage[] = [{ label: "com.acme.core", relPath: "Packages/com.acme.core", bytes: 1 }];
+
+    await importPackages(target, staged, { reporter, storeDir });
+
+    const streamCalls = rsyncMocks.rsyncCopyStream.mock.calls.map((c) => [c[0], c[1]]);
+    expect(streamCalls).toEqual([
+      [`${join(storeDir, "packages", "Packages", "com.acme.core")}/`, `${join(target, "Packages", "com.acme.core")}/`],
+    ]);
+  });
+
   it("fails fast when a requested package is not in the store slot", async () => {
     const { reporter, statusEvents } = makeFakeReporter();
-    const notStaged: StagedPackage[] = [{ label: "SOAP", relPath: "Soap", bytes: 1 }];
+    const notStaged: StagedPackage[] = [{ label: "SOAP", relPath: "Assets/Soap", bytes: 1 }];
 
     await importPackages(target, notStaged, { reporter, storeDir });
 
@@ -87,9 +103,9 @@ describe("importPackages", () => {
 
   it("rejects unsafe relPaths from meta (empty / absolute / ..) without touching the fs", async () => {
     const cases: StagedPackage[][] = [
-      [{ label: "Empty",  relPath: "",                      bytes: 1 }],
-      [{ label: "Abs",    relPath: "/etc",                  bytes: 1 }],
-      [{ label: "Escape", relPath: "Plugins/../../escaped", bytes: 1 }],
+      [{ label: "Empty",  relPath: "",                            bytes: 1 }],
+      [{ label: "Abs",    relPath: "/etc",                        bytes: 1 }],
+      [{ label: "Escape", relPath: "Assets/Plugins/../../escaped", bytes: 1 }],
     ];
 
     for (const staged of cases) {
@@ -121,7 +137,7 @@ describe("importPackages", () => {
     expect(rsyncMocks.rsyncCopyStream).not.toHaveBeenCalled();
   });
 
-  it("dangling .meta in target removed on confirm accept", async () => {
+  it("dangling .meta at the target root removed on confirm accept", async () => {
     const ghostMeta = join(target, "Ghost.meta");
     await writeFile(ghostMeta, "guid: dead", "utf8");
     const confirm = vi.fn().mockResolvedValue(true);
@@ -133,8 +149,20 @@ describe("importPackages", () => {
     await expect(readFile(ghostMeta, "utf8")).rejects.toThrow();
   });
 
+  it("dangling .meta inside the target's Assets/ is also flagged (Assets scan scope)", async () => {
+    const ghostMeta = join(target, "Assets", "Ghost.meta");
+    await writeFile(ghostMeta, "guid: dead", "utf8");
+    const confirm = vi.fn().mockResolvedValue(true);
+    const { reporter } = makeFakeReporter();
+
+    await importPackages(target, STAGED, { reporter, storeDir, confirm });
+
+    expect(confirm).toHaveBeenCalledOnce();
+    await expect(readFile(ghostMeta, "utf8")).rejects.toThrow();
+  });
+
   it("dangling .meta kept on confirm decline", async () => {
-    const ghostMeta = join(target, "Ghost.meta");
+    const ghostMeta = join(target, "Assets", "Ghost.meta");
     await writeFile(ghostMeta, "guid: dead", "utf8");
     const confirm = vi.fn().mockResolvedValue(false);
     const { reporter } = makeFakeReporter();
@@ -145,21 +173,22 @@ describe("importPackages", () => {
   });
 
   it(".meta with a matching asset in target is NOT flagged (partial-store safety)", async () => {
-    // Soap exists in the TARGET but was never staged — the v0.1 source-diff
-    // check would have flagged Soap.meta; the target-self check must not.
-    await mkdir(join(target, "Soap"), { recursive: true });
-    await writeFile(join(target, "Soap.meta"), "guid: alive", "utf8");
+    // Soap exists in the TARGET's Assets but was never staged — the v0.1
+    // source-diff check would have flagged Soap.meta; the target-self check
+    // must not.
+    await mkdir(join(target, "Assets", "Soap"), { recursive: true });
+    await writeFile(join(target, "Assets", "Soap.meta"), "guid: alive", "utf8");
     const confirm = vi.fn().mockResolvedValue(true);
     const { reporter } = makeFakeReporter();
 
     await importPackages(target, STAGED, { reporter, storeDir, confirm });
 
     expect(confirm).not.toHaveBeenCalled(); // no cleanup prompt at all
-    expect(await readFile(join(target, "Soap.meta"), "utf8")).toBe("guid: alive");
+    expect(await readFile(join(target, "Assets", "Soap.meta"), "utf8")).toBe("guid: alive");
   });
 
   it("dry-run: rsync gets dryRun, cleanup rm skipped even on accept", async () => {
-    const ghostMeta = join(target, "Ghost.meta");
+    const ghostMeta = join(target, "Assets", "Ghost.meta");
     await writeFile(ghostMeta, "guid: dead", "utf8");
     const confirm = vi.fn().mockResolvedValue(true);
     const { reporter } = makeFakeReporter();

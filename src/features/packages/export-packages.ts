@@ -4,10 +4,10 @@
  * This is the "add" operation (surfaced as `scvn packages add`). It stages the
  * given packages from a source project INTO the store library, MERGING with
  * whatever is already staged — packages added earlier from other projects are
- * preserved. Re-adding a label re-copies its mirror and updates its entry.
+ * preserved. Re-adding a relPath re-copies its mirror and updates its entry.
  *
  * Takes the package already resolved by the caller (resolveAddFolder turns the
- * picked folder into { assetsDir, relPath, label }). Nothing is re-validated
+ * picked folder into { projectRoot, relPath, label }). Nothing is re-validated
  * here: resolveAddFolder already rejected unsafe paths. importPackages does
  * re-check, because ITS input is meta.json — on-disk state possibly written by
  * an older scvn. The asymmetry is deliberate.
@@ -42,7 +42,7 @@ export interface ExportPackagesOpts {
 }
 
 /**
- * Stage the given package(s) from src (the Assets dir) into the store library.
+ * Stage the given package(s) from src (the project root) into the store library.
  * The package is resolved by the caller (resolveAddFolder) from the picked
  * folder; src + relPath locate the folder to mirror.
  */

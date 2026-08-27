@@ -52,43 +52,45 @@ export function RunOpView(props: RunOpViewProps): React.JSX.Element {
   const running = status === "running" || status === "idle";
 
   return (
-    <Card className="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden py-4">
-      <div className="flex items-center gap-3 px-6">
-        <h2 className="text-lg font-semibold tracking-tight">{props.title}</h2>
-        <StatusBadge status={status} />
-        <div className="ml-auto flex gap-2">
-          {running ? (
-            <Button type="button" variant="outline" disabled={cancelling} onClick={cancel}>
-              {cancelling ? "Cancelling…" : "Cancel"}
-            </Button>
-          ) : (
-            <Button type="button" onClick={props.onBack}>
-              Back
-            </Button>
-          )}
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col p-6">
+      <Card className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden py-4">
+        <div className="flex items-center gap-3 px-6">
+          <h2 className="text-lg font-semibold tracking-tight">{props.title}</h2>
+          <StatusBadge status={status} />
+          <div className="ml-auto flex gap-2">
+            {running ? (
+              <Button type="button" variant="outline" disabled={cancelling} onClick={cancel}>
+                {cancelling ? "Cancelling…" : "Cancel"}
+              </Button>
+            ) : (
+              <Button type="button" onClick={props.onBack}>
+                Back
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
 
-      {prompt !== null ? (
-        <div className="px-6">
-          <PromptControls key={prompt.promptId} spec={prompt.prompt} onResolve={resolvePrompt} />
+        {prompt !== null ? (
+          <div className="px-6">
+            <PromptControls key={prompt.promptId} spec={prompt.prompt} onResolve={resolvePrompt} />
+          </div>
+        ) : null}
+
+        <div className="flex min-h-0 flex-1 flex-col px-6">
+          <pre
+            ref={logRef}
+            className="font-mono text-xs bg-muted/40 rounded-md border p-3 overflow-auto min-h-0 flex-1"
+            aria-live="polite"
+          >
+            {lines.map((line, i) => (
+              <span key={i} className={cn("block", logLineClass(line.cls))}>
+                {line.text}
+              </span>
+            ))}
+          </pre>
         </div>
-      ) : null}
-
-      <div className="flex min-h-0 flex-1 flex-col px-6">
-        <pre
-          ref={logRef}
-          className="font-mono text-xs bg-muted/40 rounded-md border p-3 overflow-auto min-h-0 flex-1"
-          aria-live="polite"
-        >
-          {lines.map((line, i) => (
-            <span key={i} className={cn("block", logLineClass(line.cls))}>
-              {line.text}
-            </span>
-          ))}
-        </pre>
-      </div>
-    </Card>
+      </Card>
+    </div>
   );
 }
 

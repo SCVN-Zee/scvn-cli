@@ -162,7 +162,7 @@ export function CapabilityForm(props: CapabilityFormProps): React.JSX.Element {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[640px] p-6">
+    <div className="mx-auto w-full max-w-4xl p-6">
       {loadState.status === "loading" ? (
         <div className="flex flex-col items-center justify-center gap-2 py-16">
           <LoaderCircle className="size-4 animate-spin" />
@@ -343,16 +343,15 @@ function LaunchFieldControl(props: {
 }
 
 /**
- * One project row in the picker: the name (with its variant scene) on the left,
- * the git branch as a monospace chip, a version-mismatch warning, and the
- * last-edit age pinned right — the three facts the user picks by, kept visually
- * distinct instead of run together in one line. Renders inside the Radix
- * `ItemText`, so the collapsed trigger mirrors the same layout for the choice.
+ * One project row in the picker: the name (with its variant scene), the git
+ * branch as a monospace chip, a version-mismatch warning, and the last-edit
+ * age — kept as a compact, left-aligned cluster so the selected value reads
+ * naturally in both the trigger and the menu.
  */
 function ProjectOptionRow({ project }: { project: DiscoveredProject }): React.JSX.Element {
   return (
-    <span className="flex w-full min-w-0 items-center gap-2">
-      <span className="min-w-0 flex-1 truncate">
+    <span className="flex w-full min-w-0 items-center justify-start gap-2 text-left">
+      <span className="min-w-0 truncate">
         <span className="font-medium text-foreground">{project.name}</span>
         {project.scene ? <span className="ml-1 text-muted-foreground">({project.scene})</span> : null}
       </span>
@@ -377,15 +376,17 @@ function ProjectOptionRow({ project }: { project: DiscoveredProject }): React.JS
  * A discovered-project dropdown with a Browse fallback. Fetches the projects
  * under the configured root on mount; a path chosen via Browse (or a prefilled
  * default) that isn't in the discovered list is added as its own option so it
- * still shows as selected.
+ * still shows as selected. An optional `action` rides the control row (after
+ * Browse) so a page can put its primary button next to the target it targets.
  */
 export function ProjectControl(props: {
   id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
+  action?: React.ReactNode;
 }): React.JSX.Element {
-  const { id, label, value, onChange } = props;
+  const { id, label, value, onChange, action } = props;
   const [projects, setProjects] = useState<DiscoveredProject[] | null>(null);
   const [root, setRoot] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -417,18 +418,18 @@ export function ProjectControl(props: {
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
-      <div className="flex gap-2">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
         <Select value={value || undefined} onValueChange={onChange}>
-          <SelectTrigger id={id} className="min-w-0 flex-1" aria-label={selected ? selected.name : placeholder}>
+          <SelectTrigger id={id} className="min-w-0 flex-1 basis-0 text-left" aria-label={selected ? selected.name : placeholder}>
             {selected ? (
               <ProjectOptionRow project={selected} />
             ) : (
               <span className="text-muted-foreground">{placeholder}</span>
             )}
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="max-w-[calc(100vw-2rem)]">
             {options.map((option) => (
-              <SelectItem key={option.value} value={option.value} textValue={option.name}>
+              <SelectItem key={option.value} value={option.value} textValue={option.name} className="min-w-0">
                 <ProjectOptionRow project={option} />
               </SelectItem>
             ))}
@@ -437,6 +438,7 @@ export function ProjectControl(props: {
         <Button
           type="button"
           variant="outline"
+          className="shrink-0"
           onClick={() => {
             void pickDirectory({ kind: "dir", title: label }).then((picked) => {
               if (picked !== null) onChange(picked);
@@ -446,6 +448,7 @@ export function ProjectControl(props: {
           <FolderOpen />
           Browse…
         </Button>
+        {action}
       </div>
       {error ? (
         <p className="text-xs text-destructive">{error}</p>

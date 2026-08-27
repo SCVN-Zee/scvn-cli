@@ -79,7 +79,7 @@ export interface CapabilitySpec {
    * "settings" the Config/Doctor tabs, "packages" the Export/Import library, and
    * "mcp" the project-first, status-aware MCP page. Omitted → form.
    */
-  page?: "git" | "settings" | "packages" | "mcp";
+  page?: "git" | "settings" | "packages" | "mcp" | "init";
 }
 
 /**
@@ -91,6 +91,65 @@ export interface FormModel {
   fields: LaunchField[];
   note?: string;
   blocker?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Initializer page
+// ---------------------------------------------------------------------------
+
+export interface InitLayoutWire {
+  directories: string[];
+}
+
+export interface InitPreviewEntry {
+  path: string;
+  status: "create" | "existing" | "planned" | "created";
+}
+
+export interface InitResultWire {
+  dryRun: boolean;
+  targetAssets: string;
+  hierarchyRoot: string;
+  entries: InitPreviewEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding (config:status / doctor:report)
+// ---------------------------------------------------------------------------
+
+/**
+ * Payload of `config:status`: the effective Unity projects root + readiness.
+ * `ready` mirrors the CLI first-run guard's "usable" predicate — a root is set
+ * AND points at an existing directory. `source: "env"` means SCVN_PROJECTS_ROOT
+ * wins over the saved file value (saving a new path won't change the effective
+ * root until the override is removed).
+ */
+export interface ConfigStatus {
+  /** Home-expanded effective root, or null when unset. */
+  projectsRoot: string | null;
+  /** Root set AND an existing directory. */
+  ready: boolean;
+  source: "file" | "env" | null;
+}
+
+// WIRE MIRROR of src/doctor/runner.ts (`CheckReport` / `RunnerResult`).
+// This module stays dependency-free, so it re-declares rather than imports;
+// keep both in sync (the host handler's return annotation enforces
+// runner→shared assignability).
+/** One doctor check result, as returned by `doctor:report`. */
+export interface DoctorCheckReport {
+  id: string;
+  label: string;
+  macOnly?: boolean;
+  severity: "pass" | "warn" | "fail" | "skipped";
+  detail?: string;
+}
+
+/** Payload of `doctor:report`: every check's structured result. */
+export interface DoctorReport {
+  reports: DoctorCheckReport[];
+  /** 0 = healthy (pass/warn/skip); 1 = any fail — advisory, never blocks. */
+  exitCode: 0 | 1;
 }
 
 /** Collected launch-form values, keyed by field name. */
@@ -158,11 +217,11 @@ export type SubmoduleIgnoreList =
 
 /**
  * Payload of `packages:resolve-source`: a picked folder validated to a stageable
- * package. `ok` carries the resolved Assets dir, its Assets-relative path, and
+ * package. `ok` carries the project root, the project-root-relative path, and
  * the derived label; `invalid` carries a user-facing reason.
  */
 export type PackagesSourceResult =
-  | { status: "ok"; assetsDir: string; relPath: string; label: string }
+  | { status: "ok"; projectRoot: string; relPath: string; label: string }
   | { status: "invalid"; picked: string; message: string };
 
 /** One row in the staged package library (payload of `packages:list`). */
@@ -171,7 +230,7 @@ export interface PackageLibraryRow {
   relPath: string;
   /** Human-readable per-package provenance (source @ branch · age · size). */
   provenance: string;
-  /** Absolute Assets dir this package was staged from. */
+  /** Absolute source project root this package was staged from. */
   sourcePath: string;
   bytes: number;
 }
@@ -185,27 +244,67 @@ export interface PackagesLibraryModel {
 // MCP page (project-first, status-aware actions)
 // ---------------------------------------------------------------------------
 
-/** One core version staged locally and installable without a network fetch. */
-export interface McpStagedVersion {
-  version: string;
-  /** Came from the bundled cache (shipped with scvn) rather than the user cache. */
-  bundled: boolean;
-}
-
 /**
  * Per-target MCP state (payload of `mcp:project-status`): whether the chosen
- * project has MCP vendored and at which version, the versions staged locally
- * (newest-first — the first is the install/update target), and the addon catalog
- * the install action offers. Strictly offline — no registry round-trip — so the
- * page can gate its actions the instant a project is picked.
+ * project has MCP vendored and at which version, the addon catalog the install
+ * action offers, and the installed set. Strictly offline — no registry
+ * round-trip — so the page can gate its actions the instant a project is picked.
+ * The version chooser's core list comes from `mcp:check-updates` (online).
  */
 export interface McpProjectStatus {
   installed: boolean;
   /** Installed core version, or null when not installed / unparseable. */
   version: string | null;
-  staged: McpStagedVersion[];
   addonOptions: { value: string; label: string }[];
   defaultAddons: string[];
+  /** The installed project's current addon set (marker packages minus core+ppx); [] when not installed. Offline. */
+  installedAddons: string[];
+}
+
+// WIRE MIRROR of src/features/mcp/check-updates.ts (`PkgDelta` /
+// `CheckUpdatesResult`). This module stays dependency-free, so it re-declares
+// rather than imports; keep both in sync (the host handler's return annotation
+// enforces feature→shared assignability).
+/** One package whose resolved version differs from the installed marker (or is new). */
+export interface PkgDelta {
+  pkg: string;
+  from: string | null;
+  to: string;
+}
+
+/**
+ * Payload of `mcp:check-updates`: the coherent solve for the requested addon
+ * set, a per-package diff against the installed marker (when present), and a
+ * non-authoritative newest-published catalog. Explicitly online — a dead
+ * registry returns `offline: true` rather than throwing, so the tab can fall
+ * back to the offline `mcp:project-status` view.
+ */
+export interface CheckUpdatesResult {
+  /** The coherent solve for the requested set, or null when unresolved/offline. */
+  resolved: { core: string; packages: Record<string, string> } | null;
+  /** Set shares no core: which addons pin which cores (from conflictSummary). */
+  conflict: string | null;
+  /** Registry unreachable — the tab should fall back to the offline view. */
+  offline: boolean;
+  /** Marker map when a target is installed, else null. */
+  current: Record<string, string> | null;
+  /** Non-empty when resolved differs from current (or current is null → all "install"). */
+  updates: PkgDelta[];
+  /** Informational newest-published per addon (may pin a different core). */
+  catalog: { addon: string; newestPublished: string | null }[];
+  /**
+   * The core's true `dist-tags.latest`, independent of the addon set.
+   * `resolved.core` may be capped below this when the addons have not published
+   * a build pinning the newest core yet; null when offline.
+   */
+  coreNewestPublished: string | null;
+  /** Published stable cores, newest-first — the version chooser's menu. */
+  coreVersions: string[];
+  /**
+   * Of `coreVersions`, the ones every selected add-on pins; picking a core
+   * outside this set needs `force` (empty when the add-ons share no core).
+   */
+  compatibleCores: string[];
 }
 
 /**
@@ -269,6 +368,13 @@ export const ALL_CAPABILITIES: CapabilitySpec[] = [
     label: "Packages",
     description: "Manage a library of packages: add from a source project, remove, and import into a target.",
     page: "packages",
+    launch: [],
+  },
+  {
+    id: "init",
+    label: "Initialize",
+    description: "Create a customizable Supercent directory hierarchy under a Unity Assets folder.",
+    page: "init",
     launch: [],
   },
   {

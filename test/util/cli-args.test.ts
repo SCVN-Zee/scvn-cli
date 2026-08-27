@@ -398,3 +398,13 @@ describe("mcp namespace + flags", () => {
     expect(r.force).toBe(false);
   });
 });
+
+describe("init flags", () => {
+  it("captures --name and --layout without consuming the init command", () => {
+    const result = parseArgv(["init", "--name=Combat", "--layout", "layout.json", "--target", "/p/Assets"]);
+    expect(result.subcommands).toEqual(["init"]);
+    expect(result.name).toBe("Combat");
+    expect(result.layout).toBe("layout.json");
+    expect(result.target).toBe("/p/Assets");
+  });
+});

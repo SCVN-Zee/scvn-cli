@@ -2,10 +2,12 @@
  * test/features/export-packages.test.ts — Unit tests for exportPackages.
  *
  * rsync + sizes + git are mocked; meta.json runs against REAL tmp fixtures so
- * nested relPaths (Plugins/Sirenix) and sidecars are exercised end-to-end.
+ * nested relPaths (Assets/Plugins/Sirenix) and sidecars are exercised
+ * end-to-end.
  *
  * exportPackages takes the package already resolved by the caller
- * (resolveAddFolder) — see test/features/resolve-add-folder.test.ts.
+ * (resolveAddFolder) and src is the source project ROOT — see
+ * test/features/resolve-add-folder.test.ts.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -42,15 +44,14 @@ const mockGetRepoInfo = vi.mocked(getRepoInfo);
 function makeFakeReporter() {
   const statusEvents: SyncStatusEvent[] = [];
   const reporter: SyncReporter = {
-    onStatus(event) { statusEvents.push(event); },
-    onProgress()    { /* not asserted */ },
-    onLog()         { /* not asserted */ },
+    onStatus: (event) => { statusEvents.push(event); },
+    onLog:    () => {},
   };
   return { reporter, statusEvents };
 }
 
-const VFOLDERS = { label: "vFolders",       relPath: "vFolders" };
-const ODIN     = { label: "Odin Inspector", relPath: "Plugins/Sirenix" };
+const VFOLDERS = { label: "vFolders",       relPath: "Assets/vFolders" };
+const ODIN     = { label: "Odin Inspector", relPath: "Assets/Plugins/Sirenix" };
 
 describe("exportPackages", () => {
   let src: string;
@@ -65,17 +66,17 @@ describe("exportPackages", () => {
     mockGetRepoInfo.mockResolvedValue({ root: "/fake/hub", branch: "main" });
 
     const root = join(tmpdir(), `scvn-export-pkgs-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    src      = join(root, "hub", "Assets");
+    src      = join(root, "hub"); // the source project ROOT
     storeDir = join(root, "store");
     // Fixtures: flat package, nested package with sidecar
-    await mkdir(join(src, "vFolders"), { recursive: true });
-    await mkdir(join(src, "Plugins", "Sirenix"), { recursive: true });
-    await writeFile(join(src, "Plugins", "Sirenix.meta"), "guid: 123", "utf8");
+    await mkdir(join(src, "Assets", "vFolders"), { recursive: true });
+    await mkdir(join(src, "Assets", "Plugins", "Sirenix"), { recursive: true });
+    await writeFile(join(src, "Assets", "Plugins", "Sirenix.meta"), "guid: 123", "utf8");
     await mkdir(storeDir, { recursive: true });
   });
 
   afterEach(async () => {
-    await rm(join(src, "..", ".."), { recursive: true, force: true });
+    await rm(join(src, ".."), { recursive: true, force: true });
     vi.restoreAllMocks();
   });
 
@@ -84,31 +85,46 @@ describe("exportPackages", () => {
 
     await exportPackages(src, [VFOLDERS, ODIN], { reporter, storeDir });
 
-    // Both packages mirrored into the store
+    // Both packages mirrored into the store at their root-relative identity
     const streamCalls = rsyncMocks.rsyncCopyStream.mock.calls.map((c) => [c[0], c[1]]);
     expect(streamCalls).toEqual([
-      [`${join(src, "vFolders")}/`,         `${join(storeDir, "packages", "vFolders")}/`],
-      [`${join(src, "Plugins", "Sirenix")}/`, `${join(storeDir, "packages", "Plugins", "Sirenix")}/`],
+      [`${join(src, "Assets", "vFolders")}/`,             `${join(storeDir, "packages", "Assets", "vFolders")}/`],
+      [`${join(src, "Assets", "Plugins", "Sirenix")}/`, `${join(storeDir, "packages", "Assets", "Plugins", "Sirenix")}/`],
     ]);
 
     // Sidecar copied for Sirenix only (vFolders has none)
     expect(rsyncMocks.rsyncCopy).toHaveBeenCalledTimes(1);
     expect(rsyncMocks.rsyncCopy).toHaveBeenCalledWith(
-      join(src, "Plugins", "Sirenix.meta"),
-      join(storeDir, "packages", "Plugins", "Sirenix.meta"),
+      join(src, "Assets", "Plugins", "Sirenix.meta"),
+      join(storeDir, "packages", "Assets", "Plugins", "Sirenix.meta"),
       expect.anything(),
     );
 
     const meta = await readPackagesStoreMeta(storeDir);
     expect(meta?.kind).toBe("packages");
+    expect(meta?.version).toBe(2);
     expect(meta?.packages).toEqual([
-      { label: "vFolders",       relPath: "vFolders",        bytes: 1024 * 1024,
+      { label: "vFolders",       relPath: "Assets/vFolders",        bytes: 1024 * 1024,
         sourcePath: src, sourceName: "hub", branch: "main", stagedAt: expect.any(String) },
-      { label: "Odin Inspector", relPath: "Plugins/Sirenix", bytes: 1024 * 1024,
+      { label: "Odin Inspector", relPath: "Assets/Plugins/Sirenix", bytes: 1024 * 1024,
         sourcePath: src, sourceName: "hub", branch: "main", stagedAt: expect.any(String) },
     ]);
 
     expect(statusEvents.at(-1)?.status).toBe("done");
+  });
+
+  it("stages a root-level package outside Assets (embedded UPM)", async () => {
+    const { reporter } = makeFakeReporter();
+    await mkdir(join(src, "Packages", "com.acme.core"), { recursive: true });
+
+    await exportPackages(src, [{ label: "com.acme.core", relPath: "Packages/com.acme.core" }], { reporter, storeDir });
+
+    const streamCalls = rsyncMocks.rsyncCopyStream.mock.calls.map((c) => [c[0], c[1]]);
+    expect(streamCalls).toEqual([
+      [`${join(src, "Packages", "com.acme.core")}/`, `${join(storeDir, "packages", "Packages", "com.acme.core")}/`],
+    ]);
+    const meta = await readPackagesStoreMeta(storeDir);
+    expect(meta?.packages[0]).toMatchObject({ label: "com.acme.core", relPath: "Packages/com.acme.core" });
   });
 
   it("empty selection → skipped, no writes", async () => {
@@ -153,8 +169,8 @@ describe("exportPackages", () => {
     await exportPackages(src, [VFOLDERS], { reporter, storeDir });
 
     // Second add: Odin from a different project on a different branch
-    const otherSrc = join(src, "..", "..", "game", "Assets");
-    await mkdir(join(otherSrc, "Plugins", "Sirenix"), { recursive: true });
+    const otherSrc = join(src, "..", "game");
+    await mkdir(join(otherSrc, "Assets", "Plugins", "Sirenix"), { recursive: true });
     mockGetRepoInfo.mockResolvedValue({ root: "/fake/game", branch: "dev" });
     await exportPackages(otherSrc, [ODIN], { reporter, storeDir });
 

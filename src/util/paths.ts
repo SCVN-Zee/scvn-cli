@@ -47,26 +47,6 @@ export function deriveProjectName(projectPath: string): string {
 }
 
 /**
- * Resolve the nearest Unity `Assets` directory at or above `inputPath`.
- *
- * Walks the path segments leaf-first and returns the path truncated to and
- * including the last segment named "Assets" — the nearest Assets ancestor of a
- * folder browsed inside the Assets tree, or the folder itself when it already
- * IS Assets. Returns null when no segment is named "Assets". Pure: no I/O, so a
- * caller that also wants the "project root holds a child Assets" case checks the
- * filesystem itself.
- */
-export function resolveAssetsDir(inputPath: string): string | null {
-  const segments = inputPath.split("/");
-  for (let i = segments.length - 1; i >= 0; i -= 1) {
-    if (segments[i] === "Assets") {
-      return segments.slice(0, i + 1).join("/");
-    }
-  }
-  return null;
-}
-
-/**
  * Throw an Error if pathA and pathB resolve to the same real path.
  * Uses path.resolve (sync, no fs).
  */

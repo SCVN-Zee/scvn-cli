@@ -16,6 +16,8 @@ are identical by construction; this checklist is the guard that proves it.
 | `fork` merge attrs | `test/features/setup-merge-attributes.test.ts` | The Fork form's optional "write Unity merge `.gitattributes`" step reuses the CLI writer `writeGitAttributes()` via `setupMergeAttributes` (`src/features/setup/`); the host forks no write logic — it only resolves the picked project and toggle. |
 | `setup` | `test/commands/shared/select-setup-target.test.ts` | The form's discovery step returns the same project list the CLI picker uses. |
 | routing | `test/desktop/host-dispatch.test.ts` → "registry exposes form prepare/execute routes" | Every form capability has a `prepare` + execute route; guided ones do not. |
+| `mcp` (reconfigure) | `test/features/mcp-reconfigure.test.ts` | The host `mcp` handler forwards `{verb, target, addons, version, force}` to the same `runMcp`; `reconfigure` re-vendors an installed project's edited addon set (and/or an explicit chooser `coreVersion`) through the shared `attachMcp` reconcile path — the pin-skew gate still refuses a skewed core unless `force`, matching install. |
+| `mcp:check-updates` | `test/features/mcp-check-updates.test.ts` | The MCP tab's online check composes the same `resolveCoherentCore`→`resolveVersions` resolvers the CLI uses, and exposes the version chooser's menu (`coreVersions`, newest-first) plus its compatible subset (`compatibleCores`); read-only orientation, fail-soft to `offline:true`, forks no business logic. |
 
 The dispatcher/cancel tests in the same file prove a cancelled prompt unwinds as
 `PromptCancelled` and the host survives.

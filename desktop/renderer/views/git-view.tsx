@@ -144,7 +144,7 @@ export function GitView(props: GitViewProps): React.JSX.Element {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[640px] space-y-4 p-6">
+    <div className="mx-auto w-full max-w-4xl space-y-4 p-6">
       <Card>
         <CardHeader>
           <CardTitle>Git setup</CardTitle>

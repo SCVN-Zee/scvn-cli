@@ -60,10 +60,20 @@ const writerMocks = vi.hoisted(() => ({
   writeForkPrefs: vi.fn(),
 }));
 
+const quitMocks = vi.hoisted(() => ({
+  quitForkApp:    vi.fn(),
+  reopenForkApp:  vi.fn(),
+}));
+
 vi.mock("../../src/detectors/detect-fork-running.js",   () => ({ detectForkRunning:   detectMocks.detectForkRunning }));
 vi.mock("../../src/detectors/detect-beyond-compare.js", () => ({ detectBeyondCompare: detectMocks.detectBeyondCompare }));
 vi.mock("../../src/detectors/detect-unity-versions.js", () => ({ detectUnityVersions: detectMocks.detectUnityVersions }));
 vi.mock("../../src/writers/write-fork-prefs.js",        () => ({ writeForkPrefs:      writerMocks.writeForkPrefs }));
+vi.mock("../../src/lib/quit-fork.js",                   () => ({
+  quitForkApp:           quitMocks.quitForkApp,
+  reopenForkApp:         quitMocks.reopenForkApp,
+  FORK_QUIT_TIMEOUT_MESSAGE: "Fork did not quit in time — quit Fork manually and re-run.",
+}));
 
 import { runFork, forkPreflight, forkExecute, FORK_MACOS_ONLY_MESSAGE } from "../../src/commands/fork.js";
 
@@ -87,6 +97,8 @@ function resetMocks(): void {
   detectMocks.detectBeyondCompare.mockResolvedValue({ found: true, path: "/Applications/Beyond Compare.app" });
   detectMocks.detectUnityVersions.mockResolvedValue(UNITY);
   writerMocks.writeForkPrefs.mockResolvedValue({ backupPath: "/tmp/fork.plist.bak" });
+  quitMocks.quitForkApp.mockResolvedValue("not-running");
+  quitMocks.reopenForkApp.mockResolvedValue(true);
 }
 
 /** Scripted answers for the interactive happy path: unity-select, confirm. */
@@ -123,10 +135,47 @@ describe("runFork()", () => {
   // Precheck aborts
   // -------------------------------------------------------------------------
 
-  it("Fork running: aborts with exitCode 1, no writer", async () => {
+  it("Fork running + -y: quit auto-approved, writer runs, Fork reopened", async () => {
     detectMocks.detectForkRunning.mockResolvedValue(true);
-    await runFork({}, fakePrompt([]));
-    expect(process.exitCode).toBe(1);
+    quitMocks.quitForkApp.mockResolvedValue("quit");
+    const prompt = fakePrompt([]);
+    await runFork({ autoYes: true }, prompt);
+    expect(prompt.calls.filter((c) => c.type === "confirm")).toHaveLength(0);
+    expect(writerMocks.writeForkPrefs).toHaveBeenCalledOnce();
+    expect(quitMocks.quitForkApp).toHaveBeenCalledOnce();
+    expect(quitMocks.reopenForkApp).toHaveBeenCalledOnce();
+    expect(process.exitCode).not.toBe(1);
+  });
+
+  it("Fork running, interactive: apply confirm then DEDICATED quit ask, both approved", async () => {
+    detectMocks.detectForkRunning.mockResolvedValue(true);
+    quitMocks.quitForkApp.mockResolvedValue("quit");
+    const prompt = fakePrompt([UNITY[0]!.editorPath, true, true]); // unity, apply, quit-ask
+    await runFork({}, prompt);
+    const confirms = prompt.calls.filter((c) => c.type === "confirm");
+    expect(confirms).toHaveLength(2);
+    expect(confirms[1]?.message).toMatch(/quit it now/i);
+    expect(quitMocks.quitForkApp).toHaveBeenCalledOnce();
+    expect(quitMocks.reopenForkApp).toHaveBeenCalledOnce();
+    expect(writerMocks.writeForkPrefs).toHaveBeenCalledOnce();
+  });
+
+  it("Fork running, quit ask DECLINED: cancelled — no quit, no write, no reopen, no error exit", async () => {
+    detectMocks.detectForkRunning.mockResolvedValue(true);
+    const prompt = fakePrompt([UNITY[0]!.editorPath, true, false]); // unity, apply, quit-ask=no
+    await runFork({}, prompt);
+    expect(quitMocks.quitForkApp).not.toHaveBeenCalled();
+    expect(quitMocks.reopenForkApp).not.toHaveBeenCalled();
+    expect(writerMocks.writeForkPrefs).not.toHaveBeenCalled();
+    expect(process.exitCode).not.toBe(1);
+  });
+
+  it("Fork running + apply confirm declined: quit ask never reached", async () => {
+    detectMocks.detectForkRunning.mockResolvedValue(true);
+    const prompt = fakePrompt([UNITY[0]!.editorPath, false]);
+    await runFork({}, prompt);
+    expect(prompt.calls.filter((c) => c.type === "confirm")).toHaveLength(1);
+    expect(quitMocks.quitForkApp).not.toHaveBeenCalled();
     expect(writerMocks.writeForkPrefs).not.toHaveBeenCalled();
   });
 
@@ -247,11 +296,12 @@ describe("forkPreflight()", () => {
     expect(detectMocks.detectForkRunning).not.toHaveBeenCalled();
   });
 
-  it("Fork running → blocker", async () => {
+  it("Fork running → ok with forkRunning flag (warning, not blocker)", async () => {
     detectMocks.detectForkRunning.mockResolvedValue(true);
     const pre = await forkPreflight();
-    expect(pre.ok).toBe(false);
-    expect(pre.blocker).toMatch(/Fork is running/);
+    expect(pre.ok).toBe(true);
+    expect(pre.blocker).toBeNull();
+    expect(pre.forkRunning).toBe(true);
   });
 
   it("no Beyond Compare → blocker", async () => {
@@ -291,10 +341,78 @@ describe("forkExecute()", () => {
     expect(result.backupPath).toBe("/tmp/fork.plist.bak");
   });
 
-  it("dry-run: no writer call, still ok", async () => {
-    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: true, setupBeyondCompare: true }, fakePrompt([]));
+  it("dry-run: no writer call, no quit, no ask, still ok", async () => {
+    detectMocks.detectForkRunning.mockResolvedValue(true);
+    const prompt = fakePrompt([]);
+    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: true, setupBeyondCompare: true }, prompt);
+    expect(prompt.calls.some((c) => c.type === "confirm")).toBe(false);
     expect(writerMocks.writeForkPrefs).not.toHaveBeenCalled();
+    expect(quitMocks.quitForkApp).not.toHaveBeenCalled();
+    expect(quitMocks.reopenForkApp).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
+  });
+
+  it("Fork running: dedicated quit ask before quit-and-wait; reopen after write", async () => {
+    detectMocks.detectForkRunning.mockResolvedValue(true);
+    quitMocks.quitForkApp.mockResolvedValue("quit");
+    const prompt = fakePrompt([true]);
+    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: false, setupBeyondCompare: true }, prompt);
+    expect(prompt.calls.filter((c) => c.type === "confirm")).toHaveLength(1);
+    expect(prompt.calls[0]?.message).toMatch(/quit it now/i);
+    expect(quitMocks.quitForkApp).toHaveBeenCalledOnce();
+    expect(writerMocks.writeForkPrefs).toHaveBeenCalledOnce();
+    expect(quitMocks.reopenForkApp).toHaveBeenCalledOnce();
+    expect(result.ok).toBe(true);
+    expect(result.reopened).toBe(true);
+  });
+
+  it("Fork running, quit ask declined: declined result, nothing touched", async () => {
+    detectMocks.detectForkRunning.mockResolvedValue(true);
+    const prompt = fakePrompt([false]);
+    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: false, setupBeyondCompare: true }, prompt);
+    expect(result.ok).toBe(false);
+    expect(result.declined).toBe(true);
+    expect(quitMocks.quitForkApp).not.toHaveBeenCalled();
+    expect(writerMocks.writeForkPrefs).not.toHaveBeenCalled();
+    expect(quitMocks.reopenForkApp).not.toHaveBeenCalled();
+  });
+
+  it("autoApproveQuit skips the ask (scripted -y path)", async () => {
+    detectMocks.detectForkRunning.mockResolvedValue(true);
+    quitMocks.quitForkApp.mockResolvedValue("quit");
+    const prompt = fakePrompt([]); // no scripted answers — the ask must not fire
+    await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: false, setupBeyondCompare: true, autoApproveQuit: true }, prompt);
+    expect(prompt.calls.filter((c) => c.type === "confirm")).toHaveLength(0);
+    expect(quitMocks.quitForkApp).toHaveBeenCalledOnce();
+  });
+
+  it("Fork not running: no ask, no quit, no reopen — straight write", async () => {
+    const prompt = fakePrompt([]);
+    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: false, setupBeyondCompare: true }, prompt);
+    expect(prompt.calls.some((c) => c.type === "confirm")).toBe(false);
+    expect(quitMocks.quitForkApp).not.toHaveBeenCalled();
+    expect(quitMocks.reopenForkApp).not.toHaveBeenCalled();
+    expect(writerMocks.writeForkPrefs).toHaveBeenCalledOnce();
+    expect(result.ok).toBe(true);
+  });
+
+  it("reopen failure: write still ok, reopened:false surfaced", async () => {
+    detectMocks.detectForkRunning.mockResolvedValue(true);
+    quitMocks.quitForkApp.mockResolvedValue("quit");
+    quitMocks.reopenForkApp.mockResolvedValue(false);
+    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: false, setupBeyondCompare: true }, fakePrompt([true]));
+    expect(result.ok).toBe(true);
+    expect(result.reopened).toBe(false);
+  });
+
+  it("quit timeout: fails honestly, writer never called", async () => {
+    detectMocks.detectForkRunning.mockResolvedValue(true);
+    quitMocks.quitForkApp.mockResolvedValue("timeout");
+    const result = await forkExecute({ yamlMergePath: UNITY[0]!.yamlMergePath, dryRun: false, setupBeyondCompare: true }, fakePrompt([true]));
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/quit Fork manually/);
+    expect(writerMocks.writeForkPrefs).not.toHaveBeenCalled();
+    expect(quitMocks.reopenForkApp).not.toHaveBeenCalled();
   });
 
   it("writer failure: returns ok:false with the error message", async () => {

@@ -26,6 +26,7 @@ import type { FromHost, PromptValue } from "../../desktop/shared/ipc.js";
 import { runConfig } from "../../src/commands/config.js";
 import { fakePrompt } from "../../src/ui/prompt.js";
 import { registry } from "../../desktop/host/registry.js";
+import { CHECKS } from "../../src/doctor/checks.js";
 import { capabilities } from "../../desktop/host/capabilities.js";
 
 // ---------------------------------------------------------------------------
@@ -249,5 +250,71 @@ describe("registry exposes form prepare/execute routes", () => {
     // capability command so a ⌘⇧.-revealed tab is genuinely invokable. If
     // host-side filtering is ever reintroduced, this fails loudly.
     expect(Object.keys(registry).sort()).toEqual(["ping", ...Object.keys(capabilities)].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Onboarding status routes (config:status / doctor:report)
+// ---------------------------------------------------------------------------
+const ROOT_ENV = "SCVN_PROJECTS_ROOT";
+let prevRootEnv: string | undefined;
+
+describe("onboarding status routes", () => {
+  beforeEach(() => {
+    prevRootEnv = process.env[ROOT_ENV];
+  });
+
+  afterEach(() => {
+    if (prevRootEnv === undefined) delete process.env[ROOT_ENV];
+    else process.env[ROOT_ENV] = prevRootEnv;
+  });
+
+  it("registers the status routes on the registry", () => {
+    expect(typeof registry["config:status"]).toBe("function");
+    expect(typeof registry["doctor:report"]).toBe("function");
+  });
+
+  it("config:status reports an env-resolved existing root as ready", async () => {
+    // Env always wins over the (machine-local) config file, so pinning it
+    // makes the test deterministic without touching ~/.scvn/config.
+    const dir = await mkdtemp(path.join(os.tmpdir(), "scvn-status-"));
+    process.env[ROOT_ENV] = dir;
+    const { host, done } = driveHost(registry);
+    host.handle({ kind: "invoke", requestId: "s1", command: "config:status" });
+
+    const terminal = await done;
+    expect(terminal).toEqual({
+      kind: "result",
+      requestId: "s1",
+      value: { projectsRoot: dir, ready: true, source: "env" },
+    });
+  });
+
+  it("config:status flags a missing env root as not ready (the CLI-guard predicate)", async () => {
+    process.env[ROOT_ENV] = "/definitely/not/a/real/scvn/dir";
+    const { host, done } = driveHost(registry);
+    host.handle({ kind: "invoke", requestId: "s2", command: "config:status" });
+
+    const terminal = await done;
+    expect(terminal).toEqual({
+      kind: "result",
+      requestId: "s2",
+      value: { projectsRoot: "/definitely/not/a/real/scvn/dir", ready: false, source: "env" },
+    });
+  });
+
+  it("doctor:report returns one structured row per registered check", async () => {
+    const { host, done } = driveHost(registry);
+    host.handle({ kind: "invoke", requestId: "d1", command: "doctor:report" });
+
+    const terminal = await done;
+    expect(terminal.kind).toBe("result");
+    if (terminal.kind !== "result") return;
+    const value = terminal.value as { reports: { id: string; severity: string }[]; exitCode: number };
+    expect(value.reports.map((r) => r.id).sort()).toEqual([...CHECKS].map((c) => c.id).sort());
+    expect([0, 1]).toContain(value.exitCode);
+    for (const report of value.reports) {
+      expect(["pass", "warn", "fail", "skipped"]).toContain(report.severity);
+    }
   });
 });

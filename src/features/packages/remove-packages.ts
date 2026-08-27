@@ -2,8 +2,8 @@
  * features/packages/remove-packages.ts — Remove packages from the library.
  *
  * The counterpart to add: drop one or more staged packages from the store. For
- * each named label we delete its mirror dir + paired .meta sidecar under the
- * store, then drop its entry from meta.json. Labels not present are skipped with
+ * each named relPath we delete its mirror dir + paired .meta sidecar under the
+ * store, then drop its entry from meta.json. Paths not present are skipped with
  * a warning (never a throw). Nothing else in the library is touched.
  *
  * relPaths come from meta.json — on-disk state possibly written by an older
@@ -34,7 +34,7 @@ export interface RemovePackagesOpts {
  * Returns without writes when nothing matches or the confirm is declined.
  */
 export async function removePackages(
-  labels: string[],
+  relPaths: string[],
   opts: RemovePackagesOpts = {},
 ): Promise<void> {
   const reporter = opts.reporter ?? noopReporter;
@@ -42,8 +42,8 @@ export async function removePackages(
   const dryRun   = opts.dryRun   ?? false;
   const storeDir = getPackagesStoreDir(opts.storeDir);
 
-  if (labels.length === 0) {
-    reporter.onStatus({ status: "skipped", detail: "Nothing selected" });
+  if (relPaths.length === 0) {
+    reporter.onStatus({ status: "skipped", detail: "No packages selected" });
     return;
   }
 
@@ -54,22 +54,22 @@ export async function removePackages(
   }
 
   const wanted: Record<string, true> = {};
-  for (const label of labels) wanted[label] = true;
-  const targets: StagedPackage[] = meta.packages.filter((p) => wanted[p.label] === true);
+  for (const relPath of relPaths) wanted[relPath] = true;
+  const targets: StagedPackage[] = meta.packages.filter((p) => wanted[p.relPath] === true);
 
-  const missing = labels.filter((l) => !meta.packages.some((p) => p.label === l));
-  for (const label of missing) {
-    reporter.onLog({ ts: Date.now(), level: "warn", message: `Not staged: ${label} (skipped)` });
+  const missing = relPaths.filter((r) => !meta.packages.some((p) => p.relPath === r));
+  for (const relPath of missing) {
+    reporter.onLog({ ts: Date.now(), level: "warn", message: `Not staged: ${relPath} (skipped)` });
   }
 
   if (targets.length === 0) {
-    reporter.onStatus({ status: "skipped", detail: "No matching packages staged" });
+    reporter.onStatus({ status: "skipped", detail: "No matching packages" });
     return;
   }
 
   const freedBytes = targets.reduce((sum, p) => sum + p.bytes, 0);
   const ok = await confirm({
-    title: `Remove ${targets.length} package(s) from the library`,
+    title: "Remove from library?",
     body: targets.map((p) => `  ${p.label}  ${formatBytes(p.bytes)}`).join("\n"),
   });
   if (!ok) {
@@ -79,7 +79,7 @@ export async function removePackages(
 
   reporter.onStatus({ status: "running" });
 
-  const removedLabels: string[] = [];
+  const removedRelPaths: string[] = [];
   for (const pkg of targets) {
     if (!isSafeRelPath(pkg.relPath)) {
       // Never recursively delete an unsafe path from meta; leave the entry too.
@@ -96,15 +96,15 @@ export async function removePackages(
       await rm(mirror, { recursive: true, force: true });
       await rm(`${mirror}.meta`, { force: true });
     }
-    removedLabels.push(pkg.label);
+    removedRelPaths.push(pkg.relPath);
   }
 
-  if (!dryRun && removedLabels.length > 0) {
-    await removePackagesStoreEntries(removedLabels, opts.storeDir);
+  if (!dryRun && removedRelPaths.length > 0) {
+    await removePackagesStoreEntries(removedRelPaths, opts.storeDir);
   }
 
   reporter.onStatus({
     status: "done",
-    detail: `${removedLabels.length} package(s) removed (${formatBytes(freedBytes)} freed)`,
+    detail: `${removedRelPaths.length} package(s) removed (${formatBytes(freedBytes)} freed)`,
   });
 }

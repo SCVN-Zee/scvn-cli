@@ -7,19 +7,29 @@
  * Native dialogs (folder pickers) are owned here too (wired in Phase 3).
  */
 
-import { app, BrowserWindow, dialog, ipcMain, utilityProcess, type OpenDialogOptions, type UtilityProcess } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, screen, utilityProcess, type OpenDialogOptions, type SaveDialogOptions, type UtilityProcess } from "electron";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 import type { FromHost, PromptRequestMessage, ToHost, UpdateChannel, UpdateStatus } from "../shared/ipc.js";
 import { loadConfig } from "../../src/config/load.js";
 import electronUpdater from "electron-updater";
+import {
+  MIN_WINDOW_HEIGHT,
+  MIN_WINDOW_WIDTH,
+  clampWindowState,
+  defaultWindowState,
+  parseWindowState,
+  windowStateFromBounds,
+  type WindowState,
+} from "./window-state.js";
 
 const CHANNEL_TO_HOST = "scvn:to-host";
 const CHANNEL_FROM_HOST = "scvn:from-host";
 const CHANNEL_HOST_STATUS = "scvn:host-status";
 const CHANNEL_SELFTEST = "scvn:selftest";
 const CHANNEL_PICK_DIR = "scvn:pick-dir";
+const CHANNEL_PICK_SAVE = "scvn:pick-save";
 const CHANNEL_UPDATE_STATUS = "scvn:update-status";
 const CHANNEL_UPDATE_CHECK = "scvn:update-check";
 const CHANNEL_UPDATE_DOWNLOAD = "scvn:update-download";
@@ -88,10 +98,17 @@ function expandDefault(raw: string | undefined): string | undefined {
   return raw?.startsWith("~") ? path.join(os.homedir(), raw.slice(1)) : raw;
 }
 
-/** Open a native folder/file picker; returns the chosen path or null. */
-async function openPathDialog(opts: { kind?: "dir" | "path"; title?: string; defaultPath?: string }): Promise<string | null> {
+/** Picker options relayed over CHANNEL_PICK_DIR; `multi` enables multi-selection. */
+interface PickOptions { kind?: "dir" | "path"; title?: string; defaultPath?: string }
+
+/** Open a native folder/file picker; returns the chosen path, or null when cancelled. */
+async function openPathDialog(opts?: PickOptions): Promise<string | null>;
+/** Multi-selection variant: every chosen path, or null when cancelled / nothing chosen. */
+async function openPathDialog(opts: PickOptions & { multi: true }): Promise<string[] | null>;
+async function openPathDialog(opts: PickOptions & { multi?: boolean } = {}): Promise<string | string[] | null> {
   const properties: OpenDialogOptions["properties"] =
     opts.kind === "path" ? ["openFile", "openDirectory"] : ["openDirectory"];
+  if (opts.multi) properties.push("multiSelections");
   // Project pickers with no explicit start location open at the configured
   // Unity projects root (Settings → Config); loadConfig never throws, so an
   // unset/absent config just yields the OS default.
@@ -104,7 +121,26 @@ async function openPathDialog(opts: { kind?: "dir" | "path"; title?: string; def
   const result = mainWindow
     ? await dialog.showOpenDialog(mainWindow, options)
     : await dialog.showOpenDialog(options);
-  return result.canceled ? null : (result.filePaths[0] ?? null);
+  if (result.canceled) return null;
+  return opts.multi
+    ? (result.filePaths.length > 0 ? result.filePaths : null)
+    : (result.filePaths[0] ?? null);
+}
+
+interface SaveOptions {
+  title?: string;
+  defaultPath?: string;
+}
+
+async function savePathDialog(opts: SaveOptions = {}): Promise<string | null> {
+  const options: SaveDialogOptions = {
+    title: opts.title ?? "Save layout manifest",
+    defaultPath: expandDefault(opts.defaultPath),
+  };
+  const result = mainWindow
+    ? await dialog.showSaveDialog(mainWindow, options)
+    : await dialog.showSaveDialog(options);
+  return result.canceled ? null : (result.filePath ?? null);
 }
 
 /** Answer a dir/file text prompt by opening a native picker; null = cancelled. */
@@ -163,6 +199,41 @@ function writeUpdateChannel(channel: UpdateChannel): void {
     fs.writeFileSync(updatePrefsPath(), `${JSON.stringify({ channel }, null, 2)}\n`);
   } catch (err) {
     process.stderr.write(`update-prefs write failed: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+}
+
+/** Path to the last BrowserWindow geometry (main-owned, not the CLI config). */
+function windowStatePath(): string {
+  return path.join(app.getPath("userData"), "window-state.json");
+}
+
+/** Read saved geometry, falling back to 1224×918. Never throws. */
+function loadWindowState(): WindowState {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(windowStatePath(), "utf8"));
+    const state = parseWindowState(parsed);
+    if (state) return state;
+  } catch {
+    // Missing/corrupt prefs → fall through to the first-launch default.
+  }
+  return defaultWindowState();
+}
+
+/**
+ * Persist the window's normal bounds. Zoomed/fullscreen sessions save
+ * getNormalBounds() plus isMaximized so a later launch is not a huge normal
+ * window. Self-test never writes (must not pollute userData). A write failure
+ * is logged, never fatal.
+ */
+function saveWindowState(win: BrowserWindow): void {
+  if (SELFTEST || win.isDestroyed()) return;
+  const isMaximized = win.isMaximized();
+  const bounds = isMaximized || win.isFullScreen() ? win.getNormalBounds() : win.getBounds();
+  const state = windowStateFromBounds(bounds, isMaximized);
+  try {
+    fs.writeFileSync(windowStatePath(), `${JSON.stringify(state, null, 2)}\n`);
+  } catch (err) {
+    process.stderr.write(`window-state write failed: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
@@ -243,11 +314,15 @@ function setupAutoUpdater(): void {
 }
 
 function createWindow(): void {
+  const workAreas = screen.getAllDisplays().map((display) => display.workArea);
+  const state = clampWindowState(loadWindowState(), workAreas);
+
   mainWindow = new BrowserWindow({
-    width: 960,
-    height: 720,
-    minWidth: 600,
-    minHeight: 560,
+    width: state.width,
+    height: state.height,
+    ...(state.x !== undefined && state.y !== undefined ? { x: state.x, y: state.y } : {}),
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     title: "Supercent VN Tools",
     backgroundColor: "#121218",
     titleBarStyle: "hiddenInset",
@@ -259,6 +334,8 @@ function createWindow(): void {
       sandbox: true,
     },
   });
+
+  if (state.isMaximized) mainWindow.maximize();
 
   // The self-test env value doubles as the command to run ("1" → ping).
   const selftestEnv = process.env["SCVN_DESKTOP_SELFTEST"];
@@ -290,7 +367,21 @@ function createWindow(): void {
   wc.on("will-navigate", (event) => event.preventDefault());
   wc.setWindowOpenHandler(() => ({ action: "deny" }));
 
-  mainWindow.on("closed", () => {
+  const win = mainWindow;
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleSave = (): void => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => saveWindowState(win), 200);
+  };
+  win.on("resize", scheduleSave);
+  win.on("move", scheduleSave);
+  win.on("maximize", scheduleSave);
+  win.on("unmaximize", scheduleSave);
+  win.on("close", () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveWindowState(win);
+  });
+  win.on("closed", () => {
     mainWindow = null;
   });
 }
@@ -310,8 +401,17 @@ app.whenReady().then(() => {
   // Session-less native folder/file picker for launch forms.
   ipcMain.handle(
     CHANNEL_PICK_DIR,
-    (_event, options: { kind?: "dir" | "path"; title?: string; defaultPath?: string }) =>
-      openPathDialog(options ?? {}),
+    // Branch on multi so each side picks the matching overload (scalar vs
+    // array) instead of one broad union crossing the IPC boundary.
+    (_event, options: PickOptions & { multi?: boolean }) =>
+      options?.multi
+        ? openPathDialog({ ...options, multi: true })
+        : openPathDialog(options),
+  );
+
+  ipcMain.handle(
+    CHANNEL_PICK_SAVE,
+    (_event, options: SaveOptions | undefined) => savePathDialog(options),
   );
 
   // Update-channel preference (works in dev too — persists even when the

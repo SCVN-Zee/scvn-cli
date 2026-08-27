@@ -123,7 +123,7 @@ function defaultFail(message: string): never {
 
 function resolveGuardDeps(overrides: Partial<GuardDeps> = {}): GuardDeps {
   return {
-    resolveRoot: overrides.resolveRoot ?? (() => resolveProjectsRoot()),
+    resolveRoot: overrides.resolveRoot ?? (async () => (await resolveProjectsRoot()).root),
     isDir:       overrides.isDir       ?? defaultIsDir,
     runConfig:   overrides.runConfig   ?? realRunConfig,
     isTTY:       overrides.isTTY       ?? Boolean(process.stdin.isTTY),

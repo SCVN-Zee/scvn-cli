@@ -8,10 +8,13 @@
  *
  * Flow:
  *   1. macOS guard (non-darwin → log error + non-zero exit)
- *   2. precheck: detectForkRunning + detectBeyondCompare + detectUnityVersions → abort on blocker
+ *   2. precheck: detectForkRunning + detectBeyondCompare + detectUnityVersions
+ *      → abort on blocker; a RUNNING FORK IS NOT A BLOCKER — warned here, then
+ *      at apply: DEDICATED ASK → graceful quit-and-wait → write → reopen.
+ *      (Fork flushes its prefs on quit and would clobber the write otherwise.)
  *   3. pick-unity: clack select from detectUnityVersions (source of yamlMergePath)
  *   4. confirm: render summary → clack confirm (decline → abort, writer NOT called)
- *   5. apply: spinner while writeForkPrefs
+ *   5. apply: [quit-ask →] quit-and-wait → writeForkPrefs → [reopen Fork]
  *   6. summary: outro with result lines
  *
  * Flags:
@@ -30,6 +33,7 @@ import { detectBeyondCompare } from "../detectors/detect-beyond-compare.js";
 import { detectUnityVersions } from "../detectors/detect-unity-versions.js";
 import type { UnityVersionInfo } from "../detectors/detect-unity-versions.js";
 import { writeForkPrefs } from "../writers/write-fork-prefs.js";
+import { quitForkApp, reopenForkApp, FORK_QUIT_TIMEOUT_MESSAGE } from "../lib/quit-fork.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -46,6 +50,10 @@ export interface ForkArgs {
 export const FORK_MACOS_ONLY_MESSAGE =
   "scvn fork: macOS only (requires Fork.app and defaults command)";
 
+/** Warned pre-apply when Fork.app is running; the quit ask happens at apply. */
+export const FORK_RUNNING_WARNING =
+  "Fork is running — scvn will ask to quit it, then reopen it after applying.";
+
 /**
  * Result of the fork preflight: whether prerequisites are met, the first
  * blocker message when not, and the data the confirm/apply steps need. Pure —
@@ -57,6 +65,8 @@ export interface ForkPreflight {
   blocker: string | null;
   /** Short spinner label matching the original CLI precheck output, or null. */
   spinnerLabel: string | null;
+  /** True when Fork.app is currently running — warn + auto-quit at apply, NOT a blocker. */
+  forkRunning: boolean;
   /** Beyond Compare path when found, else null. */
   beyondComparePath: string | null;
   /** Detected Unity editors (empty when none / non-darwin). */
@@ -68,6 +78,10 @@ export interface ForkExecuteResult {
   ok: boolean;
   backupPath?: string;
   error?: string;
+  /** True when the user declined the dedicated quit-Fork ask — nothing happened. */
+  declined?: boolean;
+  /** True when a quit we initiated was followed by a successful reopen. */
+  reopened?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +98,7 @@ export async function forkPreflight(
 ): Promise<ForkPreflight> {
   const requireBeyondCompare = opts.requireBeyondCompare ?? true;
   if (process.platform !== "darwin") {
-    return { ok: false, blocker: FORK_MACOS_ONLY_MESSAGE, spinnerLabel: FORK_MACOS_ONLY_MESSAGE, beyondComparePath: null, unityVersions: [] };
+    return { ok: false, blocker: FORK_MACOS_ONLY_MESSAGE, spinnerLabel: FORK_MACOS_ONLY_MESSAGE, forkRunning: false, beyondComparePath: null, unityVersions: [] };
   }
 
   const [beyondCompare, unityVersions, forkRunning] = await Promise.all([
@@ -94,15 +108,8 @@ export async function forkPreflight(
   ]);
   const beyondComparePath = beyondCompare.found ? beyondCompare.path : null;
 
-  if (forkRunning) {
-    return {
-      ok: false,
-      blocker: "Fork is running. Quit Fork and retry.",
-      spinnerLabel: "Fork is running — quit it first",
-      beyondComparePath,
-      unityVersions,
-    };
-  }
+  // A running Fork is NOT a blocker: warn at this step, then quit-and-wait
+  // at apply (see forkExecute). Fork must simply be gone before the write.
   // Beyond Compare is a prerequisite only when the caller intends to configure
   // it as Fork's diff tool. When opted out, a missing BC is not a blocker — the
   // Unity merge-tool half is configured regardless.
@@ -111,6 +118,7 @@ export async function forkPreflight(
       ok: false,
       blocker: "Beyond Compare not found at /Applications/Beyond Compare.app. Install it first.",
       spinnerLabel: "Beyond Compare not found",
+      forkRunning,
       beyondComparePath: null,
       unityVersions,
     };
@@ -120,12 +128,13 @@ export async function forkPreflight(
       ok: false,
       blocker: "No Unity editor found under /Applications/Unity/Hub/Editor. Install via Unity Hub.",
       spinnerLabel: "No Unity editor found",
+      forkRunning,
       beyondComparePath,
       unityVersions: [],
     };
   }
 
-  return { ok: true, blocker: null, spinnerLabel: null, beyondComparePath, unityVersions };
+  return { ok: true, blocker: null, spinnerLabel: null, forkRunning, beyondComparePath, unityVersions };
 }
 
 // ---------------------------------------------------------------------------
@@ -137,28 +146,77 @@ export async function forkPreflight(
 // ---------------------------------------------------------------------------
 
 export async function forkExecute(
-  params: { yamlMergePath: string; dryRun: boolean; setupBeyondCompare: boolean },
+  params: { yamlMergePath: string; dryRun: boolean; setupBeyondCompare: boolean; autoApproveQuit?: boolean },
   prompt: PromptAdapter = realPrompt,
   output: OutputAdapter = realOutput,
 ): Promise<ForkExecuteResult> {
   const { yamlMergePath, dryRun, setupBeyondCompare } = params;
+  const autoApproveQuit = params.autoApproveQuit ?? false;
   const applyLabel = dryRun ? "Apply  [dry-run]" : "Apply";
-  const applySpinner = prompt.spinner();
-  applySpinner.start(applyLabel);
+
+  // Fresh state at apply time — the user may have quit or relaunched Fork
+  // since preflight. Presence here drives ask → quit → reopen.
+  const forkRunning = !dryRun && (await detectForkRunning());
+
+  // THE QUIT GATE — a dedicated ask, never bundled into the apply confirm:
+  // quitting the user's app needs its own explicit consent. Only -y (explicit
+  // consent to run non-interactively) auto-approves it.
+  let quitApproved = true;
+  if (forkRunning && !autoApproveQuit) {
+    quitApproved = await prompt.confirm({
+      message: "Fork is running — quit it now to apply? Fork is reopened afterwards.",
+      initialValue: true,
+    });
+  } else if (forkRunning && autoApproveQuit) {
+    output.log.step("confirm: auto-approved (-y) — quit Fork");
+  }
 
   let result: ForkExecuteResult;
+  let forkWasQuit = false;
+  let reopened = false;
 
   if (dryRun) {
-    // Dry-run: record what WOULD have been done without touching the plist
+    // Dry-run: record what WOULD have been done — no ask, no quit, no write,
+    // no reopen. (The ask is skipped above because forkRunning is forced false.)
     result = { ok: true };
-    applySpinner.stop(`${applyLabel}  (no writes — dry-run)`);
+    const drySpinner = prompt.spinner();
+    drySpinner.start(applyLabel);
+    drySpinner.stop(`${applyLabel}  (no writes — dry-run)`);
+  } else if (forkRunning && !quitApproved) {
+    result = { ok: false, declined: true, error: "Fork quit declined — no changes made." };
+    output.log.warn("Aborted — no changes made.");
   } else {
-    applySpinner.message(`${applyLabel}  writing Fork prefs…`);
-    try {
-      const written = await writeForkPrefs({ yamlMergePath, setupBeyondCompare });
-      result = { ok: true, backupPath: written.backupPath };
-    } catch (err: unknown) {
-      result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+    const applySpinner = prompt.spinner();
+    applySpinner.start(applyLabel);
+    // Fork flushes its prefs (via cfprefsd) while quitting, so it must be
+    // fully exited BEFORE `defaults write` or its flush can clobber ours.
+    if (forkRunning) {
+      applySpinner.message(`${applyLabel}  quitting Fork…`);
+      const quit = await quitForkApp();
+      if (quit === "timeout") {
+        result = { ok: false, error: FORK_QUIT_TIMEOUT_MESSAGE };
+      } else {
+        forkWasQuit = true;
+        result = { ok: true };
+      }
+    } else {
+      result = { ok: true };
+    }
+    if (result.ok) {
+      applySpinner.message(`${applyLabel}  writing Fork prefs…`);
+      try {
+        const written = await writeForkPrefs({ yamlMergePath, setupBeyondCompare });
+        result = { ok: true, backupPath: written.backupPath };
+      } catch (err: unknown) {
+        result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    // Restore the state we changed — reopen only what we closed. Best-effort:
+    // the write already succeeded, so a failed reopen downgrades to a hint.
+    if (result.ok && forkWasQuit) {
+      applySpinner.message(`${applyLabel}  reopening Fork…`);
+      reopened = await reopenForkApp();
+      result.reopened = reopened;
     }
     applySpinner.stop(
       result.ok ? `${applyLabel}  done` : `${applyLabel}  1 step(s) failed`,
@@ -173,14 +231,23 @@ export async function forkExecute(
   if (result.ok) {
     output.log.success("Succeeded (1):");
     output.log.step(`  - ${label}${result.backupPath ? `  (backup: ${result.backupPath})` : ""}`);
-  } else {
+    if (forkWasQuit) {
+      output.log.info(
+        reopened
+          ? "Fork was quit and reopened — new settings are live."
+          : "Fork was quit; it could not be reopened — open Fork manually for the new settings.",
+      );
+    }
+  } else if (!result.declined) {
     output.log.error("Failed (1):");
     output.log.step(`  - ${label}${result.error ? `  — ${result.error}` : ""}`);
   }
 
-  if (!dryRun) {
+  if (!dryRun && !result.declined) {
     output.log.info("Next steps:");
-    output.log.step("  • Quit Fork and reopen — new settings take effect on restart.");
+    if (!forkWasQuit) {
+      output.log.step("  • Quit Fork and reopen — new settings take effect on restart.");
+    }
     output.log.step("  • Rollback plist: mv {bak} {original} then: killall cfprefsd");
   }
 
@@ -240,6 +307,12 @@ export async function runFork(
 
   precheckSpinner.stop("Prerequisites OK");
 
+  // A running Fork is never handled silently — the user learns now that apply
+  // will ASK before quitting their app (dry-run warns but never asks/quits).
+  if (pre.forkRunning) {
+    output.log.warn(FORK_RUNNING_WARNING);
+  }
+
   // Step 2: pick-unity — select which Unity editor supplies UnityYAMLMerge
   const unityOptions = pre.unityVersions.map((v) => ({
     value: v.editorPath,
@@ -266,6 +339,7 @@ export async function runFork(
   const confirmLines = [
     "Pending writes:",
     "",
+    ...(pre.forkRunning ? ["Fork is running — you will be asked to quit it (it reopens afterwards).", ""] : []),
     "Fork prefs (defaults write com.DanPristupov.Fork):",
     ...(beyondCompare
       ? [`   externalDiffTool = 1  (Beyond Compare @ ${pre.beyondComparePath})`]
@@ -291,9 +365,19 @@ export async function runFork(
     return;
   }
 
-  // Step 4-5: apply + summary via the shared execute half.
-  const result = await forkExecute({ yamlMergePath: pickedUnity.yamlMergePath, dryRun, setupBeyondCompare: beyondCompare }, prompt, output);
+  // Step 4-5: apply + summary via the shared execute half. The quit-ask (and
+  // reopen, when approved) lives inside forkExecute so the GUI gets it too.
+  const result = await forkExecute(
+    { yamlMergePath: pickedUnity.yamlMergePath, dryRun, setupBeyondCompare: beyondCompare, autoApproveQuit: autoYes },
+    prompt,
+    output,
+  );
 
+  if (result.declined) {
+    // The user said no at the quit-Fork ask — a cancel, not a failure.
+    output.outro("fork: cancelled");
+    return;
+  }
   if (!result.ok) {
     process.exitCode = 1;
     output.outro("fork: completed with errors");

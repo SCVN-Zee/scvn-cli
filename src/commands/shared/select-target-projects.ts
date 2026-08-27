@@ -6,10 +6,16 @@
  *   - the picker is a single-select, never prefilled (conscious selection),
  *   - the source project is filtered out of the list,
  *   - `--to` takes a single path; passing 2+ is a usage error (imports never
- *     fan out to multiple projects),
+ *   fan out to multiple projects),
  *   - autoYes without explicit --to is a usage error — v0.1's silent
- *     "first discovered project" auto-pick overwrote whatever project was
- *     most recently modified, and that behavior is deliberately not kept.
+ *   "first discovered project" auto-pick overwrote whatever project was
+ *   most recently modified, and that behavior is deliberately not kept.
+ *
+ * Targets are project ROOTS: package identities are project-root-relative, so
+ * an Assets/... package lands under the target's Assets/ and a Packages/...
+ * package under its Packages/. `--to` accepts either the root or its Assets
+ * dir — both resolve through the same ProjectVersion.txt marker the picker
+ * discovery trusts.
  *
  * Returns a one-element array so the import call sites keep their existing
  * per-target loop + summary shape unchanged.
@@ -18,6 +24,7 @@
 import type { PromptAdapter } from "../../ui/prompt.js";
 import type { OutputAdapter } from "../../ui/output.js";
 import { discoverUnityProjects } from "../../services/discover.js";
+import { findNearestProjectRoot } from "../../features/packages/resolve-add-folder.js";
 import { getProjectsRoot, projectsToOptions } from "./project-discovery.js";
 
 /** Thrown for operator errors that should print + exit 1 without a stack. */
@@ -40,7 +47,13 @@ export async function selectTargetProjects(
     if (opts.to.length > 1) {
       throw new UsageError("import applies to one project — pass a single --to <path>");
     }
-    return opts.to;
+    // Accept the project root or its Assets dir — resolve to the root through
+    // the same marker the picker discovery trusts.
+    const root = await findNearestProjectRoot(opts.to[0]!);
+    if (root === null) {
+      throw new UsageError(`--to ${opts.to[0]} is not a Unity project (no ProjectSettings/ProjectVersion.txt at or above it)`);
+    }
+    return [root];
   }
 
   if (opts.autoYes) {
@@ -50,17 +63,17 @@ export async function selectTargetProjects(
   const excluded = new Set((opts.excludePaths ?? []).filter(Boolean));
   const root     = await getProjectsRoot();
   const projects = (await discoverUnityProjects(root))
-    .filter((p) => !excluded.has(p.path));
+    .filter((p) => !excluded.has(p.projectRoot));
 
   if (projects.length === 0) {
     output.log.warn(`No Unity projects found under ${root} — enter path manually`);
-    const single = await prompt.text({ message: "Enter target project (Assets dir) path", kind: "dir" });
-    return [single];
+    const single = await prompt.text({ message: "Enter target project path", kind: "dir" });
+    return [await findNearestProjectRoot(single) ?? single];
   }
 
   const chosen = await prompt.select({
     message: "Select target project",
-    options: projectsToOptions(projects),
+    options: projectsToOptions(projects, { value: "projectRoot" }),
   });
   return [chosen];
 }

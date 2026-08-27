@@ -29,31 +29,37 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("resolveProjectsRoot", () => {
-  it("returns the configured root from config", async () => {
-    const root = await resolveProjectsRoot(async () => ({ projectsRoot: "/vol/projects" }));
-    expect(root).toBe("/vol/projects");
+describe("resolveProjectsRoot (root + source)", () => {
+  it("returns the configured root from config, sourced from file", async () => {
+    const resolved = await resolveProjectsRoot(async () => ({ projectsRoot: "/vol/projects" }));
+    expect(resolved).toEqual({ root: "/vol/projects", source: "file" });
   });
 
   it("falls back to SCVN_PROJECTS_ROOT env when config is empty", async () => {
     process.env[ENV_KEY] = "/env/projects";
-    const root = await resolveProjectsRoot(async () => ({}));
-    expect(root).toBe("/env/projects");
+    const resolved = await resolveProjectsRoot(async () => ({}));
+    expect(resolved).toEqual({ root: "/env/projects", source: "env" });
+  });
+
+  it("env wins over a set config value and is reported as source env", async () => {
+    process.env[ENV_KEY] = "/env/projects";
+    const resolved = await resolveProjectsRoot(async () => ({ projectsRoot: "/vol/projects" }));
+    expect(resolved).toEqual({ root: "/env/projects", source: "env" });
   });
 
   it("expands a leading ~", async () => {
-    const root = await resolveProjectsRoot(async () => ({ projectsRoot: "~/Games" }));
-    expect(root).toBe(`${homedir()}/Games`);
+    const resolved = await resolveProjectsRoot(async () => ({ projectsRoot: "~/Games" }));
+    expect(resolved).toEqual({ root: `${homedir()}/Games`, source: "file" });
   });
 
-  it("returns null when unset (no config, no env)", async () => {
-    const root = await resolveProjectsRoot(async () => ({}));
-    expect(root).toBeNull();
+  it("returns null root and source when unset (no config, no env)", async () => {
+    const resolved = await resolveProjectsRoot(async () => ({}));
+    expect(resolved).toEqual({ root: null, source: null });
   });
 
   it("treats a whitespace-only value as unset", async () => {
-    const root = await resolveProjectsRoot(async () => ({ projectsRoot: "   " }));
-    expect(root).toBeNull();
+    const resolved = await resolveProjectsRoot(async () => ({ projectsRoot: "   " }));
+    expect(resolved).toEqual({ root: null, source: null });
   });
 });
 

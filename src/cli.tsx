@@ -29,6 +29,7 @@ import type { SetupOp } from "./commands/setup.js";
 import { runFork } from "./commands/fork.js";
 import { runGitCommand } from "./commands/git.js";
 import { runConfig } from "./commands/config.js";
+import { runInit } from "./commands/init.js";
 import { ensureProjectsRootConfigured, SETUP_OPS } from "./commands/first-run-guard.js";
 import { installFatalHandlers } from "./util/fatal-error.js";
 import { PromptCancelled, ProjectsRootError, ConfigRequiredError } from "./ui/errors.js";
@@ -176,6 +177,19 @@ try {
 
   } else if (effectiveNamespace === "doctor") {
     await runDoctor(undefined, { storeOverride });
+
+  } else if (firstSub === "init") {
+    if (args.subcommands.length > 1) {
+      console.error(`Unexpected argument: ${args.subcommands[1]}\nUsage: scvn init [--target <Assets dir>] [--name <ProjectName>] [--layout <file>] [-n] [-y]`);
+      process.exit(1);
+    }
+    await runInit({
+      target: args.target,
+      name: args.name,
+      layout: args.layout,
+      dryRun: args.dryRun,
+      autoYes: args.autoYes,
+    });
 
   } else if (firstSub === "fork") {
     // Trailing tokens fail loudly — a chained-op typo must not look like success.

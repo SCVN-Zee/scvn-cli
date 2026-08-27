@@ -20,7 +20,7 @@ export interface ImportSummaryOpts {
   title: string;
   /** Provenance line from formatProvenance() */
   provenance: string;
-  /** Target project paths (Assets dirs) */
+  /** Target project paths (project roots) */
   targets: string[];
   /** Path(s) checked under each target to label new vs OVERWRITE */
   rels: string[];

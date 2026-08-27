@@ -38,7 +38,7 @@ jobs:
     runs-on: macos-14 # electron-builder --mac must run on macOS
     env:
       # Ship the same tab set as stable — the MCP tab is hidden here too.
-      SCVN_TABS: fork,git,packages,settings
+      SCVN_TABS: fork,git,packages,init,settings
     steps:
       - uses: actions/checkout@v4
 

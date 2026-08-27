@@ -12,6 +12,7 @@
 import { execa } from "execa";
 import { FORK_BUNDLE_ID, FORK_PLIST } from "../lib/fork-paths.js";
 import { backupFile } from "../lib/backup.js";
+import { quitForkApp, FORK_QUIT_TIMEOUT_MESSAGE } from "../lib/quit-fork.js";
 
 // Fork 2.66.6 diff/merge tool enum rawValues — observed empirically from a
 // live install. These are compile-time constants in Fork's Swift source, so
@@ -100,9 +101,12 @@ async function writeArray(key: string, values: string[]): Promise<void> {
 export async function writeForkPrefs(
   input: ForkPrefsInput,
 ): Promise<ForkPrefsResult> {
-  // Belt-and-suspenders: precheck already aborts if Fork is running, but a
-  // user could launch Fork between precheck and apply.
-  await softExec("osascript", ["-e", 'quit app "Fork"']);
+  // Belt-and-suspenders: forkExecute already quit-and-waits before calling
+  // us, but the user could relaunch Fork in between. A fire-and-forget quit
+  // is not enough — Fork's on-quit prefs flush would race our writes — so
+  // wait for the exit and refuse to write if Fork will not leave.
+  const quit = await quitForkApp();
+  if (quit === "timeout") throw new Error(FORK_QUIT_TIMEOUT_MESSAGE);
 
   const backupPath = await backupFile(FORK_PLIST);
 

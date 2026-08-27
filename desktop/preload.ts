@@ -14,6 +14,7 @@ const CHANNEL_TO_HOST = "scvn:to-host";
 const CHANNEL_FROM_HOST = "scvn:from-host";
 const CHANNEL_SELFTEST = "scvn:selftest";
 const CHANNEL_PICK_DIR = "scvn:pick-dir";
+const CHANNEL_PICK_SAVE = "scvn:pick-save";
 const CHANNEL_UPDATE_STATUS = "scvn:update-status";
 const CHANNEL_UPDATE_CHECK = "scvn:update-check";
 const CHANNEL_UPDATE_DOWNLOAD = "scvn:update-download";
@@ -48,6 +49,14 @@ const bridge: ScvnBridge & { __selftest(ok: boolean): void } = {
 
   pickDirectory(options?: { kind?: "dir" | "path"; title?: string; defaultPath?: string }): Promise<string | null> {
     return ipcRenderer.invoke(CHANNEL_PICK_DIR, options ?? {}) as Promise<string | null>;
+  },
+
+  pickDirectories(options?: { kind?: "dir" | "path"; title?: string; defaultPath?: string }): Promise<string[] | null> {
+    return ipcRenderer.invoke(CHANNEL_PICK_DIR, { ...(options ?? {}), multi: true }) as Promise<string[] | null>;
+  },
+
+  pickSaveFile(options?: { title?: string; defaultPath?: string }): Promise<string | null> {
+    return ipcRenderer.invoke(CHANNEL_PICK_SAVE, options ?? {}) as Promise<string | null>;
   },
 
   onUpdateStatus(handler: (status: UpdateStatus) => void): () => void {

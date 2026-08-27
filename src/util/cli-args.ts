@@ -54,12 +54,16 @@ export interface ParsedArgs {
   from?: string;
   /** --to values (import target project paths, repeatable) */
   to: string[];
-  /** --target value (setup-op target project path, last occurrence wins) */
+  /** --target value (setup-op / init target Assets path, last occurrence wins) */
   target?: string;
   /** --store value (snapshot-store dir override, last occurrence wins) */
   store?: string;
   /** --addons value (`scvn mcp` addon CSV, last occurrence wins) */
   addons?: string;
+  /** --name value (`scvn init` project directory name, last occurrence wins) */
+  name?: string;
+  /** --layout value (`scvn init` JSON manifest path, last occurrence wins) */
+  layout?: string;
   /** Parse warnings for the caller to print (e.g. value flag without value) */
   warnings: string[];
 }
@@ -70,7 +74,7 @@ const KNOWN_NAMESPACES = new Set([
 ]);
 
 /** Flags that consume the next token as their value. */
-const VALUE_FLAGS = new Set(["--from", "--to", "--target", "--store", "--addons"]);
+const VALUE_FLAGS = new Set(["--from", "--to", "--target", "--store", "--addons", "--name", "--layout"]);
 
 /**
  * Parse an argv array (pass `process.argv.slice(2)`).
@@ -92,6 +96,8 @@ export function parseArgv(argv: string[]): ParsedArgs {
   let target: string | undefined;
   let store: string | undefined;
   let addons: string | undefined;
+  let name: string | undefined;
+  let layout: string | undefined;
   const to: string[] = [];
   const subcommands: string[] = [];
   const warnings: string[] = [];
@@ -99,12 +105,13 @@ export function parseArgv(argv: string[]): ParsedArgs {
   // Single pass with index so value flags can consume their next token.
   const positionals: string[] = [];
 
-  /** Bind a value flag, shared by the `--flag value` and `--flag=value` forms. */
   function assignValueFlag(flag: string, value: string): void {
     if (flag === "--from")         from = value;
     else if (flag === "--target")  target = value;
     else if (flag === "--store")   store = value;
     else if (flag === "--addons")  addons = value;
+    else if (flag === "--name")    name = value;
+    else if (flag === "--layout")  layout = value;
     else                           to.push(value);
   }
 
@@ -202,7 +209,7 @@ export function parseArgv(argv: string[]): ParsedArgs {
     ignore, exclude, lfs,
     force, purgeNuget, beyondCompare,
     namespace, subcommands,
-    from, to, target, store, addons,
+    from, to, target, store, addons, name, layout,
     warnings,
   };
 }

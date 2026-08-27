@@ -28,7 +28,7 @@ import {
 import type { Packument } from "../../services/npm-registry.js";
 import { OPENUPM_REGISTRY, CORE_PKG } from "./mcp-constants.js";
 import { shortAddonName } from "./addon-names.js";
-import { semverMax, isPrerelease } from "./semver-compare.js";
+import { semverMax, isPrerelease, compareVersions } from "./semver-compare.js";
 import type { ResolveOpts } from "./resolve-versions.js";
 
 /**
@@ -167,4 +167,37 @@ export async function resolveCoherentCore(
     );
   }
   return best;
+}
+
+/**
+ * The version chooser's menu and its compatibility signal. `published` is every
+ * stable core the registry serves, newest-first. `compatible` is the subset that
+ * EVERY addon in `addons` pins a build for — picking a `published` core outside
+ * it is exactly the pin-skew `attachMcp` refuses without `force`. An empty (or
+ * pin-less) addon set is unconstrained: every published core is compatible.
+ *
+ * Prereleases are excluded for the same reason `resolveCoherentCore` excludes
+ * them: the chooser must not offer a beta as if it were a normal target.
+ */
+export async function coreVersionOptions(
+  addons: readonly string[],
+  opts: CoherentCoreOpts = {},
+): Promise<{ published: string[]; compatible: string[] }> {
+  const corePackument = await fetchPackument(OPENUPM_REGISTRY, CORE_PKG, opts);
+  const published = allVersions(corePackument)
+    .filter((version) => !isPrerelease(version))
+    .sort(compareVersions)
+    .reverse();
+  if (addons.length === 0) return { published, compatible: published };
+
+  const pinSets: Set<string>[] = [];
+  for (const addon of addons) {
+    const packument = await fetchPackument(OPENUPM_REGISTRY, addon, opts);
+    const cores = pinnedCores(packument);
+    if (cores.size > 0) pinSets.push(cores);
+  }
+  if (pinSets.length === 0) return { published, compatible: published };
+
+  const compatible = published.filter((version) => pinSets.every((cores) => cores.has(version)));
+  return { published, compatible };
 }

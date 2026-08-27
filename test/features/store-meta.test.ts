@@ -20,33 +20,33 @@ import { getPackagesStoreMetaPath } from "../../src/features/store/store-paths.j
 
 const VFOLDERS: StagedPackage = {
   label:      "vFolders",
-  relPath:    "vFolders",
+  relPath:    "Assets/vFolders",
   bytes:      1_048_576,
-  sourcePath: "/projects/hub/Assets",
+  sourcePath: "/projects/hub",
   sourceName: "hub",
   branch:     "main",
   stagedAt:   "2026-06-09T10:00:00.000Z",
 };
 const ODIN: StagedPackage = {
   label:      "Odin Inspector",
-  relPath:    "Plugins/Sirenix",
+  relPath:    "Assets/Plugins/Sirenix",
   bytes:      51_380_224,
-  sourcePath: "/projects/hub/Assets",
+  sourcePath: "/projects/hub",
   sourceName: "hub",
   branch:     "main",
   stagedAt:   "2026-06-09T10:00:00.000Z",
 };
 const SOAP: StagedPackage = {
   label:      "SOAP",
-  relPath:    "Soap",
+  relPath:    "Assets/Soap",
   bytes:      2_048,
-  sourcePath: "/projects/game/Assets",
+  sourcePath: "/projects/game",
   sourceName: "game",
   branch:     null,
   stagedAt:   "2026-06-20T12:00:00.000Z",
 };
 
-const LIBRARY: PackagesStoreMeta = { kind: "packages", packages: [VFOLDERS, ODIN] };
+const LIBRARY: PackagesStoreMeta = { kind: "packages", version: 2, packages: [VFOLDERS, ODIN] };
 
 /** A legacy single-slot meta: top-level provenance, packages without their own. */
 const LEGACY_META = {
@@ -57,7 +57,7 @@ const LEGACY_META = {
   exportedAt: "2026-05-01T08:00:00.000Z",
   bytes:      52_428_800,
   packages: [
-    { label: "vFolders",       relPath: "vFolders",        bytes: 1_048_576 },
+     { label: "vFolders",       relPath: "vFolders",        bytes: 1_048_576 },
     { label: "Odin Inspector", relPath: "Plugins/Sirenix", bytes: 51_380_224 },
   ],
 };
@@ -65,7 +65,7 @@ const LEGACY_META = {
 /** A foreign (non-packages) meta shape, to prove the reader rejects on kind mismatch. */
 const FOREIGN_META = {
   kind:       "toolkit",
-  sourcePath: "/projects/hub/Assets",
+  sourcePath: "/projects/hub",
   packages:   [],
 };
 
@@ -128,47 +128,77 @@ describe("store-meta", () => {
     await writeFile(getPackagesStoreMetaPath(storeDir), JSON.stringify(LEGACY_META), "utf8");
     const read = await readPackagesStoreMeta(storeDir);
     expect(read).not.toBeNull();
+    expect(read?.version).toBe(2);
     expect(read?.packages).toHaveLength(2);
     for (const pkg of read!.packages) {
-      expect(pkg.sourcePath).toBe("/projects/hub/Assets");
+      // Legacy provenance inherited + v1→v2 identity migration: sourcePath
+      // points at the project root, relPaths gain the Assets/ prefix.
+      expect(pkg.sourcePath).toBe("/projects/hub");
       expect(pkg.sourceName).toBe("hub");
       expect(pkg.branch).toBe("release");
       expect(pkg.stagedAt).toBe("2026-05-01T08:00:00.000Z");
+      expect(pkg.relPath.startsWith("Assets/")).toBe(true);
     }
   });
 
-  it("upsert merges by label, appends new labels, and keeps other sources", async () => {
+  it("upsert merges by relPath, appends new paths, and keeps other sources", async () => {
     await writePackagesStoreMeta(LIBRARY, storeDir); // vFolders, Odin (hub)
     const merged = await upsertPackagesStoreMeta([SOAP], storeDir); // add from a different source
-    expect(merged.packages.map((p) => p.label)).toEqual(["vFolders", "Odin Inspector", "SOAP"]);
+    expect(merged.packages.map((p) => p.relPath)).toEqual([
+      "Assets/vFolders",
+      "Assets/Plugins/Sirenix",
+      "Assets/Soap",
+    ]);
     expect(merged.packages[2]).toEqual(SOAP);
 
-    // Re-adding an existing label updates it in place (no duplicate, same position).
+    // Re-adding an existing relPath updates it in place (no duplicate, same position).
     const reAdded = await upsertPackagesStoreMeta(
       [{ ...VFOLDERS, bytes: 999, stagedAt: "2026-07-01T00:00:00.000Z" }],
       storeDir,
     );
-    expect(reAdded.packages.map((p) => p.label)).toEqual(["vFolders", "Odin Inspector", "SOAP"]);
+    expect(reAdded.packages.map((p) => p.relPath)).toEqual([
+      "Assets/vFolders",
+      "Assets/Plugins/Sirenix",
+      "Assets/Soap",
+    ]);
     expect(reAdded.packages[0]?.bytes).toBe(999);
+  });
+
+  it("upsert keeps packages with the same label but different relPaths", async () => {
+    const assetsFoo: StagedPackage = {
+      ...VFOLDERS,
+      label: "Foo",
+      relPath: "Assets/Foo",
+    };
+    const packagesFoo: StagedPackage = {
+      ...SOAP,
+      label: "Foo",
+      relPath: "Packages/Foo",
+      sourcePath: "/projects/hub",
+      sourceName: "hub",
+    };
+    const merged = await upsertPackagesStoreMeta([assetsFoo, packagesFoo], storeDir);
+    expect(merged.packages.map((p) => p.relPath)).toEqual(["Assets/Foo", "Packages/Foo"]);
+    expect(merged.packages.map((p) => p.label)).toEqual(["Foo", "Foo"]);
   });
 
   it("upsert into an empty store writes just the new entries", async () => {
     const merged = await upsertPackagesStoreMeta([SOAP], storeDir);
     expect(merged.packages).toEqual([SOAP]);
-    expect(await readPackagesStoreMeta(storeDir)).toEqual({ kind: "packages", packages: [SOAP] });
+    expect(await readPackagesStoreMeta(storeDir)).toEqual({ kind: "packages", version: 2, packages: [SOAP] });
   });
 
-  it("remove drops only named labels and returns the removed entries", async () => {
-    await writePackagesStoreMeta({ kind: "packages", packages: [VFOLDERS, ODIN, SOAP] }, storeDir);
-    const removed = await removePackagesStoreEntries(["Odin Inspector"], storeDir);
+  it("remove drops only named relPaths and returns the removed entries", async () => {
+    await writePackagesStoreMeta({ kind: "packages", version: 2, packages: [VFOLDERS, ODIN, SOAP] }, storeDir);
+    const removed = await removePackagesStoreEntries(["Assets/Plugins/Sirenix"], storeDir);
     expect(removed).toEqual([ODIN]);
     const read = await readPackagesStoreMeta(storeDir);
-    expect(read?.packages.map((p) => p.label)).toEqual(["vFolders", "SOAP"]);
+    expect(read?.packages.map((p) => p.relPath)).toEqual(["Assets/vFolders", "Assets/Soap"]);
   });
 
-  it("remove of an absent label is a no-op returning []", async () => {
+  it("remove of an absent relPath is a no-op returning []", async () => {
     await writePackagesStoreMeta(LIBRARY, storeDir);
-    const removed = await removePackagesStoreEntries(["Nope"], storeDir);
+    const removed = await removePackagesStoreEntries(["Packages/Nope"], storeDir);
     expect(removed).toEqual([]);
     expect((await readPackagesStoreMeta(storeDir))?.packages).toHaveLength(2);
   });

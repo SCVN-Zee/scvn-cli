@@ -29,16 +29,36 @@ export const MISSING_PROJECTS_ROOT_MESSAGE =
   "SCVN_PROJECTS_ROOT is not set or points to a missing directory — run `scvn config`, set the env var, or pass --from/--to/--target";
 
 /**
+ * Where a resolved projects root came from. `"env"` means the current
+ * SCVN_PROJECTS_ROOT always wins over the saved file value (loadConfig Layer 3)
+ * — setup UIs surface that so saving a file path isn't silently ignored.
+ */
+export type ProjectsRootSource = "file" | "env";
+
+/** resolveProjectsRoot() result: the effective root plus its winning source. */
+export interface ResolvedProjectsRoot {
+  root: string | null;
+  source: ProjectsRootSource | null;
+}
+
+/**
  * Resolve the projects root from config file (or SCVN_PROJECTS_ROOT env),
- * home-expanded. Returns null when neither is set (or is whitespace-only).
+ * home-expanded. Root is null when neither is set (or is whitespace-only).
  * Pure aside from the injected config loader — safe for the guard to call.
+ *
+ * Source semantics: the current env var always wins, so it is reported as
+ * `"env"`. The deprecated SYNC_UNITY_* fallback only fills unset fields — it
+ * stops applying the moment a file value is saved — so it cannot override a
+ * save and is coalesced into `"file"`.
  */
 export async function resolveProjectsRoot(
   loadCfg: () => Promise<ScvnConfig> = realLoadConfig,
-): Promise<string | null> {
+): Promise<ResolvedProjectsRoot> {
   const cfg = await loadCfg();
-  const raw = (cfg.projectsRoot ?? process.env["SCVN_PROJECTS_ROOT"] ?? "").trim();
-  return raw ? expandHome(raw) : null;
+  const envRoot = (process.env["SCVN_PROJECTS_ROOT"] ?? "").trim();
+  const raw = envRoot || (cfg.projectsRoot ?? "").trim();
+  if (!raw) return { root: null, source: null };
+  return { root: expandHome(raw), source: envRoot ? "env" : "file" };
 }
 
 function defaultFail(message: string): never {
@@ -57,7 +77,7 @@ export interface GetProjectsRootDeps {
  * guard is expected to have caught this earlier for root-needing commands.
  */
 export async function getProjectsRoot(deps: GetProjectsRootDeps = {}): Promise<string> {
-  const root = await resolveProjectsRoot(deps.loadConfig);
+  const { root } = await resolveProjectsRoot(deps.loadConfig);
   if (root) return root;
   return (deps.fail ?? defaultFail)(MISSING_PROJECTS_ROOT_MESSAGE);
 }
@@ -74,10 +94,14 @@ export async function getProjectsRoot(deps: GetProjectsRootDeps = {}): Promise<s
  *
  * When `opts.editorVersion` is given (fork's editor pick), projects whose
  * parsed Unity version differs get a version-mismatch hint prefix.
+ *
+ * `opts.value: "projectRoot"` picks the option value's path shape — the
+ * default `p.path` is the Assets dir (git/setup/mcp), the packages flow keys
+ * on the project root.
  */
 export function projectsToOptions(
   projects: Project[],
-  opts: { editorVersion?: string } = {},
+  opts: { editorVersion?: string; value?: "path" | "projectRoot" } = {},
 ): PromptOption<string>[] {
   return projects.map((p) => {
     const scene = p.scene && p.scene !== p.name ? p.scene : undefined;
@@ -87,7 +111,7 @@ export function projectsToOptions(
         ? `version mismatch (project ${p.projectVersion}, editor ${opts.editorVersion})`
         : undefined;
     return {
-      value: p.path,
+      value: (opts.value ?? "path") === "projectRoot" ? p.projectRoot : p.path,
       label: `${p.name}${scene ? ` (${scene})` : ""}${p.branch ? ` · ${p.branch}` : ""}`,
       hint: mismatch ? `${mismatch} · ${agePart}` : agePart,
     };
