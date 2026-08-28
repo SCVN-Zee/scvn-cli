@@ -25,7 +25,9 @@ dev:
 bump:
 	npm version $(VERSION) --no-git-tag-version
 	@v=$$(node -p "require('./package.json').version") && \
-	  echo "Bumped to v$$v"
+	  git commit -q -m "chore(release): v$$v" package.json package-lock.json && \
+	  git tag -a "v$$v" -m "v$$v" && \
+	  echo "Bumped to v$$v — commit + annotated tag created. Push with: git push --atomic origin $$(git branch --show-current) v$$v"
 
 build:
 	npm run build
