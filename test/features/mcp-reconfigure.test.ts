@@ -45,9 +45,6 @@ const ANIM_NEW = "1.2.25";
 vi.mock("../../src/detectors/detect-unity-running.js", () => ({
   detectUnityRunning: vi.fn(async () => false),
 }));
-vi.mock("../../src/features/mcp/invoke-setup-mcp.js", () => ({
-  invokeSetupMcp: vi.fn(async () => true),
-}));
 vi.mock("../../src/features/mcp/resolve-unity-mcp-cli.js", () => ({
   ensureUnityMcpCli: vi.fn(async (core: string) => ({
     dir: "/cache/unity-mcp-cli",

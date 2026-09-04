@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import path from "node:path";
-import { mkdir, writeFile, readFile, access, realpath } from "node:fs/promises";
+import { mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { execa } from "execa";
 import { tmpDir } from "../helpers/tmp-dir.js";
 import { fakeRegistry } from "../helpers/mcp-registry-fake.js";
@@ -40,9 +40,6 @@ const PARTICLE = "com.ivanmurzak.unity.mcp.particlesystem";
 vi.mock("../../src/detectors/detect-unity-running.js", () => ({
   detectUnityRunning: vi.fn(async () => false),
 }));
-vi.mock("../../src/features/mcp/invoke-setup-mcp.js", () => ({
-  invokeSetupMcp: vi.fn(async () => true),
-}));
 vi.mock("../../src/features/mcp/resolve-unity-mcp-cli.js", () => ({
   ensureUnityMcpCli: vi.fn(async (core: string) => ({
     dir: "/cache/unity-mcp-cli",
@@ -52,7 +49,6 @@ vi.mock("../../src/features/mcp/resolve-unity-mcp-cli.js", () => ({
 }));
 
 import { detectUnityRunning } from "../../src/detectors/detect-unity-running.js";
-import { invokeSetupMcp } from "../../src/features/mcp/invoke-setup-mcp.js";
 
 function catalog(): FakePackage[] {
   return [
@@ -132,7 +128,6 @@ beforeEach(() => {
   _resetBundledMcpCache();
   _setBundledMcpRootForTest(null);
   vi.mocked(detectUnityRunning).mockResolvedValue(false);
-  vi.mocked(invokeSetupMcp).mockResolvedValue(true);
 });
 
 describe("installMcp — clean install", () => {
@@ -166,10 +161,6 @@ describe("installMcp — clean install", () => {
     // THE assertion: nothing to commit. Thousands of vendored files, zero in git.
     expect(await porcelain(repo)).toBe("");
 
-    // .mcp.json was delegated to the CLI, with the PROJECT dir (not the repo root).
-    expect(invokeSetupMcp).toHaveBeenCalledWith(
-      expect.objectContaining({ unityProjectDir: await realpath(project) }),
-    );
   });
 
   it("fences the vendored paths, anchored at the repo root for a NESTED project", async () => {
@@ -188,22 +179,17 @@ describe("installMcp — clean install", () => {
     expect(await porcelain(repo)).toBe("");
   });
 
-  it("fences .mcp.json — the install creates it, so the install must hide it", async () => {
-    // A real unity-mcp-cli writes .mcp.json into the project dir. Left unfenced it
-    // shows up as an untracked file, which breaks the promise the whole feature
-    // rests on: after an install there is genuinely nothing to commit.
+  it("leaves agent config generation to the lifecycle runner", async () => {
+    // Package ownership only vendors source and markers; setup-mcp owns config.
+    // Keeping the responsibilities separate prevents a partial config write.
     for (const nested of [false, true]) {
       const { repo, project, target } = await makeRepo(nested);
       const cacheDir = await tmpDir("scvn-mcp-cache-");
       const registry = await fakeRegistry(catalog());
-      vi.mocked(invokeSetupMcp).mockImplementation(async () => {
-        await writeFile(path.join(project, ".mcp.json"), '{"mcpServers":{}}\n');
-        return true;
-      });
 
       await installMcp({ target, cacheDir, ...registry });
 
-      expect(await exists(path.join(project, ".mcp.json"))).toBe(true);
+      expect(await exists(path.join(project, ".mcp.json"))).toBe(false);
       expect(await porcelain(repo)).toBe("");
       _resetPackumentCache();
     }
@@ -718,20 +704,5 @@ describe("installMcp — no git repo", () => {
     await expect(
       installMcp({ target: path.join(dir, "Assets"), cacheDir, ...registry }),
     ).rejects.toThrow(/not a Unity project/);
-  });
-});
-
-describe("installMcp — .mcp.json failure is not fatal", () => {
-  it("completes the vendoring when setup-mcp fails", async () => {
-    const { repo, project, target } = await makeRepo();
-    const cacheDir = await tmpDir("scvn-mcp-cache-");
-    const registry = await fakeRegistry(catalog());
-    vi.mocked(invokeSetupMcp).mockResolvedValue(false);
-
-    await expect(installMcp({ target, cacheDir, ...registry })).resolves.toBeUndefined();
-
-    expect(await exists(path.join(importRoot(project), CORE_PKG))).toBe(true);
-    expect(await markerVersion(project)).toBe(CORE_VER);
-    expect(await porcelain(repo)).toBe("");
   });
 });

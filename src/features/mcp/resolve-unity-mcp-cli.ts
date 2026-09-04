@@ -30,6 +30,18 @@ export interface CliClosureResult {
   alreadyStaged: boolean;
 }
 
+export interface EnsureUnityMcpCliOpts extends FetchVersionOpts {
+  /** Require a CLI exactly matching core when generating project config. */
+  exact?: boolean;
+}
+
+class CliRegistryUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("unity-mcp-cli registry unavailable: " + String(cause));
+    this.name = "CliRegistryUnavailableError";
+  }
+}
+
 /**
  * The CLI version to pair with `coreVersion`. It normally tracks core exactly.
  * When it does not (publish lag), take the newest CLI that does NOT EXCEED core:
@@ -42,7 +54,12 @@ export async function resolveCliVersion(
   coreVersion: string,
   opts: FetchVersionOpts,
 ): Promise<string> {
-  const packument = await fetchPackument(NPM_REGISTRY, CLI_PKG, opts);
+  let packument: Awaited<ReturnType<typeof fetchPackument>>;
+  try {
+    packument = await fetchPackument(NPM_REGISTRY, CLI_PKG, opts);
+  } catch (error) {
+    throw new CliRegistryUnavailableError(error);
+  }
   const published = allVersions(packument);
 
   if (published.includes(coreVersion)) return coreVersion;
@@ -69,21 +86,35 @@ export async function resolveCliVersion(
  */
 export async function ensureUnityMcpCli(
   coreVersion: string,
-  opts: FetchVersionOpts,
+  opts: EnsureUnityMcpCliOpts,
 ): Promise<CliClosureResult> {
   // Offline fast path, and it has to come FIRST. If a usable CLI is already
-  // cached — in a bundle, say — use it without asking the registry anything.
-  // Resolving the version before looking in the cache would need the network to
-  // find something already on disk, and the bundle's whole purpose is to work
-  // without one. `resolveCliForCore` also accepts a CLI that lagged core by a
-  // publish, which is exactly what a bundle may be carrying.
   const cached = await resolveCliForCore(coreVersion, { userCacheDir: opts.cacheDir });
-  if (cached !== null) {
+  if (cached !== null && (!opts.exact || cached.version === coreVersion)) {
     return { dir: cached.dir, version: cached.version, alreadyStaged: true };
   }
 
-  // Nothing usable cached — ask the registry which version to pair with core.
-  const version = await resolveCliVersion(coreVersion, opts);
+  let version: string;
+  if (opts.exact && cached !== null) {
+    try {
+      version = await resolveCliVersion(coreVersion, opts);
+      if (version !== coreVersion) throw new Error("registry has no exact version");
+    } catch (error) {
+      if (!(error instanceof CliRegistryUnavailableError)) throw error;
+      opts.reporter?.onLog({
+        ts: Date.now(),
+        level: "warn",
+        message: "exact unity-mcp-cli is unavailable; using cached " + cached.version + " for offline compatibility (" + String(error) + ")",
+      });
+      return { dir: cached.dir, version: cached.version, alreadyStaged: true };
+    }
+  } else {
+    // Nothing usable cached — ask the registry which version to pair with core.
+    version = await resolveCliVersion(coreVersion, opts);
+    if (opts.exact && version !== coreVersion) {
+      throw new Error(CLI_PKG + " has no exact version for core " + coreVersion + "; refusing incompatible CLI " + version);
+    }
+  }
   const target = cliDir(version, opts.cacheDir);
 
   if (opts.dryRun) {

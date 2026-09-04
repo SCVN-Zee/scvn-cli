@@ -32,7 +32,6 @@ import { resolveCoherentCore, NoCoherentCoreError } from "./resolve-coherent-cor
 import { ensureStaged } from "./ensure-staged.js";
 import { ensureUnityMcpCli } from "./resolve-unity-mcp-cli.js";
 import { attachMcp } from "./attach-mcp.js";
-import { invokeSetupMcp } from "./invoke-setup-mcp.js";
 import { resolveMcpVerDir } from "./resolve-mcp-cache.js";
 import type { FetchVersionOpts } from "./fetch-version.js";
 
@@ -47,6 +46,7 @@ export interface UpdateMcpOpts extends FetchVersionOpts {
   /** Warn-ignored — the marker is the lockfile. */
   addons?: readonly string[];
   force?: boolean;
+  agent?: string;
 }
 
 function log(opts: UpdateMcpOpts, level: "info" | "warn", message: string): void {
@@ -142,7 +142,7 @@ export async function updateMcp(opts: UpdateMcpOpts): Promise<void> {
     throw new Error(`V${nextCore} could not be staged — inspect ${opts.cacheDir}`);
   }
 
-  const cli = await ensureUnityMcpCli(nextCore, opts).catch(() => null);
+  await ensureUnityMcpCli(nextCore, opts).catch(() => null);
 
   // 5. The same reconcile-attach path install uses.
   await attachMcp({
@@ -156,15 +156,6 @@ export async function updateMcp(opts: UpdateMcpOpts): Promise<void> {
     reporter: opts.reporter,
   });
 
-  if (cli !== null) {
-    await invokeSetupMcp({
-      unityProjectDir,
-      cliVersion: cli.version,
-      cacheDir: opts.cacheDir,
-      dryRun: opts.dryRun,
-      reporter: opts.reporter,
-    });
-  }
 
   log(opts, "info", `rollback: scvn mcp update ${oldCore} --target ${opts.target}`);
   opts.reporter?.onStatus({

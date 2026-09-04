@@ -22,8 +22,12 @@ export interface HostApi {
 }
 
 /** Serialize an unknown throw into an ErrorMessage's name/message fields. */
-function describeError(err: unknown): { name: string; message: string } {
-  if (err instanceof Error) return { name: err.name || "Error", message: err.message };
+function describeError(err: unknown): { name: string; message: string; stage?: string } {
+  if (err instanceof Error) {
+    const candidate = err as Error & { stage?: unknown };
+    const stage = typeof candidate.stage === "string" ? candidate.stage : undefined;
+    return { name: err.name || "Error", message: err.message, ...(stage ? { stage } : {}) };
+  }
   return { name: "Error", message: String(err) };
 }
 
@@ -55,8 +59,8 @@ export function createHost(send: (message: FromHost) => void, registry: CommandR
               send({ kind: "result", requestId, value });
             })
             .catch((err: unknown) => {
-              const { name, message: msg } = describeError(err);
-              send({ kind: "error", requestId, name, message: msg });
+              const { name, message: msg, stage } = describeError(err);
+              send({ kind: "error", requestId, name, message: msg, ...(stage ? { stage } : {}) });
             })
             .finally(() => {
               sessions.delete(requestId);

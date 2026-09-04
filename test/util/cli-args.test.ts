@@ -135,10 +135,18 @@ describe("parseArgv — namespace extraction", () => {
       subcommands: [],
       from: undefined,
       to: [],
+      target: undefined,
+      store: undefined,
+      addons: undefined,
+      agent: undefined,
+      enableAllTools: true,
+      enableAllPrompts: true,
+      enableAllResources: true,
+      name: undefined,
+      layout: undefined,
       warnings: [],
     });
   });
-
   it("sync with multiple subcommands preserves order", () => {
     const r = parseArgv(["sync", "gitignore", "lfs", "gitexclude"]);
     expect(r.namespace).toBe("sync");

@@ -249,6 +249,7 @@ export function App() {
           args={route.args}
           title={route.title}
           onBack={backToForm}
+          onRun={onRun}
         />
       ) : route.kind === "editor" ? (
         <TemplateEditorView

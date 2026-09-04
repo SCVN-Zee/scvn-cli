@@ -20,12 +20,14 @@ import { pickDirectory } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import { useHostRun, logLineClass, type RunStatus } from "@/lib/use-host-run";
 import type { PromptSpec, PromptValue } from "@shared/ipc";
+import type { LaunchValues } from "@shared/commands";
 
 export interface RunOpViewProps {
   command: string;
   args: unknown;
   title: string;
   onBack: () => void;
+  onRun: (capabilityId: string, values: LaunchValues) => void;
 }
 
 const promptShellClass =
@@ -50,6 +52,14 @@ export function RunOpView(props: RunOpViewProps): React.JSX.Element {
   }, [lines.length]);
 
   const running = status === "running" || status === "idle";
+  // A completed MCP install offers the follow-up finish (open Unity, wait for
+  // the plugin, generate skills) reusing the exact values the install used.
+  const finishValues = React.useMemo(() => {
+    if (props.command !== "mcp" || typeof props.args !== "object" || props.args === null) return null;
+    const { verb, ...rest } = props.args as Record<string, unknown>;
+    if (verb !== "install" || typeof rest.target !== "string" || rest.target === "") return null;
+    return rest as LaunchValues;
+  }, [props.command, props.args]);
 
   return (
     <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col p-6">
@@ -63,9 +73,16 @@ export function RunOpView(props: RunOpViewProps): React.JSX.Element {
                 {cancelling ? "Cancelling…" : "Cancel"}
               </Button>
             ) : (
-              <Button type="button" onClick={props.onBack}>
-                Back
-              </Button>
+              <>
+                {status === "done" && finishValues ? (
+                  <Button type="button" onClick={() => props.onRun("mcp", { ...finishValues, verb: "finish" })}>
+                    Open Unity &amp; finish setup
+                  </Button>
+                ) : null}
+                <Button type="button" onClick={props.onBack}>
+                  Back
+                </Button>
+              </>
             )}
           </div>
         </div>

@@ -19,11 +19,6 @@ import { runMcp } from "../../src/commands/mcp.js";
 import { runPackages } from "../../src/commands/packages.js";
 import { ignoreDirtyList, ignoreDirtySet } from "./ignore-dirty.js";
 import { discoverSetupTargetsRich } from "../../src/commands/shared/select-setup-target.js";
-import { MCP_ADDON_OPTIONS } from "../../src/commands/shared/select-mcp-addons.js";
-import { CORE_PKG, PPX_PKG, DEFAULT_ADDONS } from "../../src/features/mcp/mcp-constants.js";
-import { isInstalled, markerVersion, markerPackages } from "../../src/features/mcp/marker.js";
-import { writeCacheDir } from "../../src/features/mcp/resolve-mcp-cache.js";
-import { checkUpdates } from "../../src/features/mcp/check-updates.js";
 import { templatesRead, templatesWrite, templatesReset } from "./templates.js";
 import { setupMergeAttributes } from "../../src/features/setup/setup-merge-attributes.js";
 import { loadConfig } from "../../src/config/load.js";
@@ -40,7 +35,6 @@ import type {
   PackagesSourceResult,
   PackagesLibraryModel,
   McpProjectStatus,
-  CheckUpdatesResult,
   ConfigStatus,
   DoctorReport,
 } from "../shared/commands.js";
@@ -50,7 +44,8 @@ import { removePackages, resolveAddFolder } from "../../src/features/packages/in
 import { initializeProject, parseInitLayout } from "../../src/features/init/index.js";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-
+import { DEFAULT_MCP_EXTENSIONS, MCP_EXTENSIONS, PROJECT_LOCAL_AGENTS } from "../../src/features/mcp/upstream.js";
+import { readUpstreamProjectState } from "../../src/features/mcp/upstream-status.js";
 // ---------------------------------------------------------------------------
 // Launch-arg parsing (renderer sends a Record over IPC, typed `unknown` here)
 // ---------------------------------------------------------------------------
@@ -235,58 +230,45 @@ export const capabilities: CommandRegistry = {
   "templates:write": templatesWrite,
   "templates:reset": templatesReset,
 
-  // --- mcp: project-first, status-aware page ----------------------------
-  // The renderer draws its own page (page: "mcp"): pick a project, then this
-  // command reports that project's install state so the page offers only the
-  // valid actions. Strictly offline — the same detectors `scvn mcp status` uses.
+  // --- mcp: local package and config lifecycle ---
   async "mcp:project-status"(_session: HostSession, args: unknown): Promise<unknown> {
     const target = str(asRecord(args), "target");
-    const addonOptions = MCP_ADDON_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
-    const defaultAddons = [...DEFAULT_ADDONS];
-    if (!target) {
-      return { installed: false, version: null, addonOptions, defaultAddons, installedAddons: [] } satisfies McpProjectStatus;
-    }
-    // The picker value is the project's Assets dir; the install marker lives at
-    // the project root (Assets' parent) — the same target shape `scvn mcp` uses.
-    const projectRoot = path.dirname(target);
-    const installed = await isInstalled(projectRoot);
-    const version = installed ? await markerVersion(projectRoot) : null;
-    // The marker's addon set seeds the installed-project picker — offline, so the
-    // tab can pre-check it before any registry round-trip.
-    const installedAddons = installed
-      ? (await markerPackages(projectRoot)).filter((p) => p !== CORE_PKG && p !== PPX_PKG)
-      : [];
-    return { installed, version, addonOptions, defaultAddons, installedAddons } satisfies McpProjectStatus;
+    const state = target
+      ? await readUpstreamProjectState(target)
+      : { installed: false, version: null, extensions: [], agent: null, enableAllTools: true, enableAllPrompts: true, enableAllResources: true };
+    return {
+      installed: state.installed,
+      version: state.version,
+      installedAddons: state.extensions,
+      agent: state.agent,
+      enableAllTools: state.enableAllTools,
+      enableAllPrompts: state.enableAllPrompts,
+      enableAllResources: state.enableAllResources,
+      agentOptions: PROJECT_LOCAL_AGENTS.map(({ value, label }) => ({ value, label })),
+      extensionOptions: MCP_EXTENSIONS.map(({ value, label }) => ({ value, label })),
+      defaultExtensions: [...DEFAULT_MCP_EXTENSIONS],
+      configPath: null,
+    } satisfies McpProjectStatus;
   },
 
-  // Online, explicit update check for the MCP tab. Returns a coherent solve for
-  // the requested addon set (never per-addon maxima) plus a per-package diff
-  // against the installed marker. Fail-soft: registry errors → offline:true.
-  async "mcp:check-updates"(_session: HostSession, args: unknown): Promise<CheckUpdatesResult> {
-    const rec = asRecord(args);
-    const addons = strArray(rec, "addons");
-    const target = str(rec, "target");
-    return checkUpdates(addons, {
-      target: target || undefined,
-      userCacheDir: writeCacheDir(),
-      // Every pickable add-on, so the tab can show a version next to each row
-      // (the coherent solve still uses only the selected `addons`).
-      catalogAddons: MCP_ADDON_OPTIONS.map((o) => o.value),
-    });
-  },
 
   async mcp(session: HostSession, args: unknown): Promise<unknown> {
     const record = asRecord(args);
-    const addons = record["addons"];
+    const extensions = strArray(record, "extensions");
     await runMcp(
       {
         verb: str(record, "verb"),
         version: str(record, "version"),
         target: str(record, "target"),
-        addons: Array.isArray(addons) && addons.length > 0 ? addons.join(",") : undefined,
+        addons: record.extensions === undefined ? undefined : extensions.join(","),
+        agent: str(record, "agent"),
+        enableAllTools: bool(record, "enableAllTools"),
+        enableAllPrompts: bool(record, "enableAllPrompts"),
+        enableAllResources: bool(record, "enableAllResources"),
         force: bool(record, "force"),
         dryRun: false,
         autoYes: false,
+        throwOnFailure: true,
       },
       createGuiPrompt(session),
       createGuiOutput(session),

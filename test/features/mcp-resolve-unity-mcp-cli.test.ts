@@ -175,14 +175,47 @@ describe("ensureUnityMcpCli", () => {
     expect(registry.fetchBinary).not.toHaveBeenCalled();
   });
 
+  it("does not use an older cached CLI in exact mode", async () => {
+    const cacheDir = await tmpDir("scvn-cli-cache-");
+    const registry = await fakeRegistry([...cliCatalog("0.82.3"), ...cliCatalog(CORE_VER)]);
+    await ensureUnityMcpCli("0.82.3", { cacheDir, ...registry });
+
+    const result = await ensureUnityMcpCli(CORE_VER, { cacheDir, exact: true, ...registry });
+
+    expect(result.version).toBe(CORE_VER);
+    expect(result.alreadyStaged).toBe(false);
+  });
+  it("uses an older cached CLI only when the registry is unavailable", async () => {
+    const cacheDir = await tmpDir("scvn-cli-cache-");
+    const registry = await fakeRegistry(cliCatalog("0.82.3"));
+    await ensureUnityMcpCli("0.82.3", { cacheDir, ...registry });
+    _resetPackumentCache();
+    const offline = {
+      fetchImpl: vi.fn(async () => { throw new Error("network is down"); }),
+      fetchBinary: vi.fn(async () => { throw new Error("network is down"); }),
+    };
+
+    const result = await ensureUnityMcpCli(CORE_VER, { cacheDir, exact: true, ...offline });
+
+    expect(result.version).toBe("0.82.3");
+    expect(result.alreadyStaged).toBe(true);
+  });
+
+  it("does not hide a published exact-version mismatch behind the cache", async () => {
+    const cacheDir = await tmpDir("scvn-cli-cache-");
+    const registry = await fakeRegistry(cliCatalog("0.82.3"));
+    await ensureUnityMcpCli("0.82.3", { cacheDir, ...registry });
+
+    await expect(ensureUnityMcpCli(CORE_VER, { cacheDir, exact: true, ...registry })).rejects.toThrow(/registry has no exact version/);
+  });
   it("resolves a BUNDLED cli with NO registry call at all (the artist-Mac path)", async () => {
     // Looking up the version before checking the cache would need the network to
     // find something already sitting on disk — which is precisely what a bundled,
     // offline machine cannot do. The cache probe has to come first.
     const bundleRoot = await tmpDir("scvn-bundle-");
     const cacheDir = await tmpDir("scvn-cli-cache-");
-    const seed = await fakeRegistry(cliCatalog());
-    await ensureUnityMcpCli(CORE_VER, { cacheDir: bundleRoot, ...seed });
+    const seed = await fakeRegistry(cliCatalog("0.82.3"));
+    await ensureUnityMcpCli("0.82.3", { cacheDir: bundleRoot, ...seed });
     _setBundledMcpRootForTest(bundleRoot);
 
     _resetPackumentCache();
@@ -191,11 +224,11 @@ describe("ensureUnityMcpCli", () => {
       fetchBinary: vi.fn(async () => { throw new Error("network is down"); }),
     };
 
-    const result = await ensureUnityMcpCli(CORE_VER, { cacheDir, ...offline });
+    const result = await ensureUnityMcpCli(CORE_VER, { cacheDir, exact: true, ...offline });
 
+    expect(result.version).toBe("0.82.3");
     expect(result.alreadyStaged).toBe(true);
-    expect(offline.fetchImpl).not.toHaveBeenCalled();
-    expect(offline.fetchBinary).not.toHaveBeenCalled();
+    expect(offline.fetchImpl).toHaveBeenCalled();
     // And the bundled copy still runs.
     const run = await execa(process.execPath, [cliEntryPath(result.dir), "--version"]);
     expect(run.exitCode).toBe(0);

@@ -3,8 +3,8 @@
  *
  *   status     what is staged, and which projects have it installed (offline)
  *   install    vendor into a project + write .mcp.json
- *   uninstall  remove the vendored source (+ optionally the NuGet DLLs)
- *   update     bump an installed project (an older version = offline rollback)
+ *   uninstall  remove local Unity-MCP packages (+ optionally the NuGet DLLs)
+ *   update     update local Unity-MCP packages (an older version = offline rollback)
  *   reconfigure  change an installed project's addon set atomically
  *
  * Bare `scvn mcp` prints the usage hint and exits 1 — the `scvn git` precedent,
@@ -25,24 +25,30 @@ import { runStep } from "./shared/step-runner.js";
 import { autoConfirm } from "../features/transfer/reporter.js";
 import { getMcpStatus, renderMcpStatus } from "../features/mcp/status-mcp.js";
 import { writeCacheDir } from "../features/mcp/resolve-mcp-cache.js";
-import { expandAddonCsv } from "../features/mcp/addon-names.js";
-import { installMcp } from "../features/mcp/install-mcp.js";
-import { uninstallMcp } from "../features/mcp/uninstall-mcp.js";
-import { updateMcp } from "../features/mcp/update-mcp.js";
-import { reconfigureMcp } from "../features/mcp/reconfigure-mcp.js";
+import type { McpAgentId } from "../features/mcp/upstream.js";
+import { PROJECT_LOCAL_AGENTS, removeMcpPlugin, runMcpLifecycle } from "../features/mcp/upstream.js";
 
-export type McpVerb = "status" | "install" | "uninstall" | "update" | "reconfigure";
+export type McpVerb = "status" | "install" | "uninstall" | "update" | "reconfigure" | "skills" | "finish";
 
-const VERBS = new Set<string>(["status", "install", "uninstall", "update", "reconfigure"]);
+const VERBS = new Set<string>(["status", "install", "uninstall", "update", "reconfigure", "skills", "finish"]);
 
 export const MCP_USAGE_HINT = `scvn mcp needs a verb:
-  scvn mcp status                          staged versions + per-project install state (offline)
-  scvn mcp install [<coreVer>] [--addons a,b]  vendor Unity-MCP into a project + write .mcp.json
-  scvn mcp uninstall [--purge-nuget]       remove the vendored source
-  scvn mcp update [<coreVer>]              bump an installed project (an older version = offline rollback)
-  scvn mcp reconfigure [--addons a,b]      re-vendor an installed project to a new addon set
-Version: omitted → the newest core every selected addon has a build for. Name one to override.
-Target: --target <Assets dir> | SCVN_TARGET | interactive picker (-y requires an explicit --target).`;
+  scvn mcp status                                      staged versions + per-project install state (offline)
+  scvn mcp install [<coreVer>] [--addons a,b]         vendor packages and write the selected agent config
+  scvn mcp uninstall [--purge-nuget]                  remove local Unity-MCP packages
+  scvn mcp update [<coreVer>]                          update an installed project (older version = rollback)
+  scvn mcp reconfigure [--addons a,b]                 re-vendor an installed project with a new extension set
+  scvn mcp skills [--agent <id>]                       generate skills after opening the Unity project
+  scvn mcp finish [--agent <id>]                       open the Unity project, wait for the plugin, generate skills
+Options: --agent <id>, --enable-all-tools/prompts/resources (each defaults on)
+Target: --target <Assets dir> | SCVN_TARGET | interactive picker (-y requires an explicit target).`;
+
+function parseAgent(value: string | undefined): McpAgentId | undefined {
+  if (value === undefined) return undefined;
+  const agent = PROJECT_LOCAL_AGENTS.find((candidate) => candidate.value === value);
+  if (!agent) throw new Error(`Unsupported project-local MCP agent: ${value}`);
+  return agent.value;
+}
 
 export interface McpCommandArgs {
   verb?: string;
@@ -50,6 +56,11 @@ export interface McpCommandArgs {
   version?: string;
   target?: string;
   addons?: string;
+  throwOnFailure?: boolean;
+  agent?: string;
+  enableAllTools?: boolean;
+  enableAllPrompts?: boolean;
+  enableAllResources?: boolean;
   force?: boolean;
   purgeNuget?: boolean;
   dryRun?: boolean;
@@ -62,6 +73,7 @@ export async function runMcp(
   output: OutputAdapter = realOutput,
 ): Promise<void> {
   const verb = args.verb;
+  const agent = parseAgent(args.agent);
 
   if (!verb || !VERBS.has(verb)) {
     if (verb) console.error(`Unknown mcp subcommand: ${verb}\n`);
@@ -76,11 +88,11 @@ export async function runMcp(
   }
 
   let addons: string[] | undefined;
-  // A TYPED --addons is a requirement; anything else (the seed, the picker) is a
-  // preference that may degrade to the cached set on an offline machine.
-  const addonsRequired = args.addons !== undefined;
+  // Only an install with typed --addons is a hard requirement. Reconfigure
+  // remains strict in its owner even when the list came from the picker.
+  const addonsRequired = verb === "install" && args.addons !== undefined;
   if (args.addons !== undefined) {
-    addons = expandAddonCsv(args.addons);
+    addons = args.addons.split(",").map((part) => part.trim()).filter(Boolean);
   }
 
   output.intro(`scvn mcp ${verb}`);
@@ -112,33 +124,25 @@ export async function runMcp(
       label: `mcp ${verb}  ${path.basename(path.dirname(target))}`,
       dryRun,
       run: (reporter) => {
-        const shared = { target, cacheDir: writeCacheDir(), dryRun, reporter };
         if (verb === "uninstall") {
-          return uninstallMcp({ ...shared, purgeNuget: args.purgeNuget ?? false });
+          return removeMcpPlugin({ target, dryRun, purgeNuget: args.purgeNuget, reporter });
         }
-        if (verb === "update") {
-          return updateMcp({
-            ...shared,
-            coreVersion: args.version,
-            addons,
-            force: args.force ?? false,
+        return (async () => {
+          await runMcpLifecycle({
+            target,
+            verb: verb as "install" | "update" | "reconfigure" | "skills" | "finish",
+            extensions: addons,
+            addonsRequired,
+            agent,
+            pluginVersion: args.version,
+            enableAllTools: args.enableAllTools ?? true,
+            enableAllPrompts: args.enableAllPrompts ?? true,
+            enableAllResources: args.enableAllResources ?? true,
+            force: args.force,
+            dryRun,
+            reporter,
           });
-        }
-        if (verb === "reconfigure") {
-          return reconfigureMcp({
-            ...shared,
-            addons,
-            coreVersion: args.version,
-            force: args.force ?? false,
-          });
-        }
-        return installMcp({
-          ...shared,
-          addons,
-          addonsRequired,
-          coreVersion: args.version,
-          force: args.force ?? false,
-        });
+        })();
       },
     },
     prompt,
@@ -147,8 +151,8 @@ export async function runMcp(
   );
 
   if (outcome === "failed") {
+    if (args.throwOnFailure) throw new Error(`mcp ${verb} failed`);
     process.exitCode = 1;
-    output.outro(`mcp ${verb}: failed`);
     return;
   }
   output.outro(dryRun ? `mcp ${verb}: dry-run complete (no writes)` : `mcp ${verb}: done`);

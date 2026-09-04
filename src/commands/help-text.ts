@@ -25,10 +25,11 @@ packages verbs (bare noun opens a menu):
                    (export is a back-compat alias for add)
 
 mcp verbs (bare noun prints this hint):
-  status           Staged versions + per-project install state (offline)
-  install          Vendor Unity-MCP + write the project's .mcp.json
+  status           staged versions + per-project install state (offline)
+  install          Vendor packages and write the selected project-local agent config
   uninstall        Remove the vendored source (--purge-nuget also drops the DLLs)
-  update [<ver>]   Bump an installed project; an older <ver> is an offline rollback
+  update [<ver>]   Update an installed project; an older <ver> is an offline rollback
+  reconfigure      Change extensions and regenerate the selected agent config
 
 git ops (scvn git — pick ≥1 flag; combine freely):
   --ignore         Install repo-root .gitignore + prune nested
@@ -44,7 +45,11 @@ Flags:
   --name <name>    scvn init default hierarchy project name (without --layout)
   --layout <file>  scvn init full Assets-relative JSON hierarchy
   --store <path>   Snapshot-store dir override (export/import/doctor; or SCVN_STORE_DIR)
-  --addons <a,b>   scvn mcp install: addon selection
+  --addons <a,b>   scvn mcp install/reconfigure: extension selection
+  --agent <id>     project-local agent config target
+  --no-tools       omit MCP tools from generated config
+  --no-prompts     omit MCP prompts from generated config
+  --no-resources   omit MCP resources from generated config
   --force          scvn mcp: override a refusing gate (installed, pin skew, Unity open)
   --purge-nuget    scvn mcp uninstall: also remove Assets/Plugins/NuGet
   --no-beyond-compare  scvn fork: skip configuring Beyond Compare as the diff tool

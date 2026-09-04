@@ -12,7 +12,7 @@
  * Ports `ensure_staged` (unity-mcp-localize.sh:495).
  */
 
-import { CORE_PKG, PPX_PKG } from "./mcp-constants.js";
+import { ADDON_NAMESPACE, CORE_PKG, PPX_PKG } from "./mcp-constants.js";
 import { fetchVersion } from "./fetch-version.js";
 import type { FetchVersionOpts } from "./fetch-version.js";
 import { resolveMcpVerDir } from "./resolve-mcp-cache.js";
@@ -59,7 +59,7 @@ export async function ensureStaged(
   }
 
   // Re-stage with the union of what is already there and what is being added.
-  const existingAddons = present.filter((pkg) => pkg !== CORE_PKG && pkg !== PPX_PKG);
+  const existingAddons = present.filter((pkg) => pkg.startsWith(ADDON_NAMESPACE));
   const union = [...new Set([...existingAddons, ...missing])];
 
   opts.reporter?.onLog({

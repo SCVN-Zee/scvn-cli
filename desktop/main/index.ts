@@ -52,7 +52,10 @@ let hostRespawns = 0;
 
 /** Fork the command host and relay its messages to the renderer. */
 function spawnHost(): void {
-  host = utilityProcess.fork(HOST_ENTRY, [], { serviceName: "scvn-host" });
+  host = utilityProcess.fork(HOST_ENTRY, [], {
+    serviceName: "scvn-host",
+    env: { ...process.env, SCVN_HOST_EXEC_PATH: process.execPath },
+  });
 
   host.on("message", (message: FromHost) => {
     // Directory/file text prompts are answered by a native picker in main,

@@ -50,7 +50,7 @@ installFatalHandlers();
 
 const NOUN_VERBS: Record<string, readonly string[]> = {
   packages: ["add", "remove", "import", "export"],
-  mcp:      ["status", "install", "uninstall", "update"],
+  mcp:      ["status", "install", "uninstall", "update", "reconfigure"],
 };
 
 // ---------------------------------------------------------------------------
@@ -156,6 +156,10 @@ try {
       version:    args.subcommands[1],   // `install <coreVer>` / `update <coreVer>`
       target:     args.target,
       addons:     args.addons,
+      agent:      args.agent,
+      enableAllTools: args.enableAllTools,
+      enableAllPrompts: args.enableAllPrompts,
+      enableAllResources: args.enableAllResources,
       force:      args.force,
       purgeNuget: args.purgeNuget,
       dryRun:     args.dryRun,

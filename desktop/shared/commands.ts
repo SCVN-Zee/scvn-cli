@@ -132,11 +132,7 @@ export interface ConfigStatus {
   source: "file" | "env" | null;
 }
 
-// WIRE MIRROR of src/doctor/runner.ts (`CheckReport` / `RunnerResult`).
-// This module stays dependency-free, so it re-declares rather than imports;
-// keep both in sync (the host handler's return annotation enforces
-// runner→shared assignability).
-/** One doctor check result, as returned by `doctor:report`. */
+// WIRE MIRROR of src/doctor/runner.ts (CheckReport / RunnerResult).
 export interface DoctorCheckReport {
   id: string;
   label: string;
@@ -145,10 +141,8 @@ export interface DoctorCheckReport {
   detail?: string;
 }
 
-/** Payload of `doctor:report`: every check's structured result. */
 export interface DoctorReport {
   reports: DoctorCheckReport[];
-  /** 0 = healthy (pass/warn/skip); 1 = any fail — advisory, never blocks. */
   exitCode: 0 | 1;
 }
 
@@ -245,66 +239,22 @@ export interface PackagesLibraryModel {
 // ---------------------------------------------------------------------------
 
 /**
- * Per-target MCP state (payload of `mcp:project-status`): whether the chosen
- * project has MCP vendored and at which version, the addon catalog the install
- * action offers, and the installed set. Strictly offline — no registry
- * round-trip — so the page can gate its actions the instant a project is picked.
- * The version chooser's core list comes from `mcp:check-updates` (online).
+ * Per-target MCP state (payload of `mcp:project-status`): upstream plugin state
+ * plus project-local agent and extension catalogs. Strictly offline so the page
+ * can gate its actions as soon as a project is picked.
  */
 export interface McpProjectStatus {
   installed: boolean;
-  /** Installed core version, or null when not installed / unparseable. */
   version: string | null;
-  addonOptions: { value: string; label: string }[];
-  defaultAddons: string[];
-  /** The installed project's current addon set (marker packages minus core+ppx); [] when not installed. Offline. */
   installedAddons: string[];
-}
-
-// WIRE MIRROR of src/features/mcp/check-updates.ts (`PkgDelta` /
-// `CheckUpdatesResult`). This module stays dependency-free, so it re-declares
-// rather than imports; keep both in sync (the host handler's return annotation
-// enforces feature→shared assignability).
-/** One package whose resolved version differs from the installed marker (or is new). */
-export interface PkgDelta {
-  pkg: string;
-  from: string | null;
-  to: string;
-}
-
-/**
- * Payload of `mcp:check-updates`: the coherent solve for the requested addon
- * set, a per-package diff against the installed marker (when present), and a
- * non-authoritative newest-published catalog. Explicitly online — a dead
- * registry returns `offline: true` rather than throwing, so the tab can fall
- * back to the offline `mcp:project-status` view.
- */
-export interface CheckUpdatesResult {
-  /** The coherent solve for the requested set, or null when unresolved/offline. */
-  resolved: { core: string; packages: Record<string, string> } | null;
-  /** Set shares no core: which addons pin which cores (from conflictSummary). */
-  conflict: string | null;
-  /** Registry unreachable — the tab should fall back to the offline view. */
-  offline: boolean;
-  /** Marker map when a target is installed, else null. */
-  current: Record<string, string> | null;
-  /** Non-empty when resolved differs from current (or current is null → all "install"). */
-  updates: PkgDelta[];
-  /** Informational newest-published per addon (may pin a different core). */
-  catalog: { addon: string; newestPublished: string | null }[];
-  /**
-   * The core's true `dist-tags.latest`, independent of the addon set.
-   * `resolved.core` may be capped below this when the addons have not published
-   * a build pinning the newest core yet; null when offline.
-   */
-  coreNewestPublished: string | null;
-  /** Published stable cores, newest-first — the version chooser's menu. */
-  coreVersions: string[];
-  /**
-   * Of `coreVersions`, the ones every selected add-on pins; picking a core
-   * outside this set needs `force` (empty when the add-ons share no core).
-   */
-  compatibleCores: string[];
+  agent: string | null;
+  enableAllTools: boolean;
+  enableAllPrompts: boolean;
+  enableAllResources: boolean;
+  agentOptions: { value: string; label: string }[];
+  extensionOptions: { value: string; label: string }[];
+  defaultExtensions: string[];
+  configPath: string | null;
 }
 
 /**
@@ -359,7 +309,7 @@ export const ALL_CAPABILITIES: CapabilitySpec[] = [
   {
     id: "mcp",
     label: "MCP",
-    description: "Manage the Unity MCP integration in a project (status/install/update/uninstall).",
+    description: "Vendor Unity MCP packages and write agent config into a project.",
     page: "mcp",
     launch: [],
   },
