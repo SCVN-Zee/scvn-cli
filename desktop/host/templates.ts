@@ -1,26 +1,15 @@
-/**
- * desktop/host/templates.ts — Host handlers for the per-feature template editor.
- *
- * Three plain request/response commands (no session prompts, no streaming):
- *   templates:read  → TemplateContent          (effective + bundled default)
- *   templates:write → { isOverridden: true }   (atomic write to ~/.scvn/templates)
- *   templates:reset → { isOverridden: false }  (remove the override file)
- *
- * Writes are restricted to the EDITABLE_TEMPLATE_KEYS set — any other key is
- * rejected. Each filename is derived from templateFilename(key) (the CLI's
- * FILENAME_MAP), the single source of truth. Reads/writes go through the same
- * resolveTemplateKey / getTemplatesOverrideDir seams the CLI uses, so a GUI edit
- * is honored by a subsequent `scvn git` run with no restart (probe is uncached).
- */
-
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { getTemplatesOverrideDir } from "../../src/config/paths.js";
+/** Preset management shares the CLI resolver; Default is bundled and read-only. */
+import { randomUUID } from "node:crypto";
+import { readFile, unlink } from "node:fs/promises";
 import {
-  resolveTemplateKey,
+  readTemplatePresets,
+  saveTemplatePresets,
+  writeTemplateFile,
   resolveTemplatePath,
   templateFilename,
+  templatePresetPath,
   templateSourceFilename,
+  type TemplatePresets,
 } from "../../src/util/template-paths.js";
 import {
   EDITABLE_TEMPLATE_KEYS,
@@ -28,7 +17,6 @@ import {
   type TemplateContent,
 } from "../shared/commands.js";
 
-/** Validate the `key` arg is one of the editable templates. */
 function requireEditableKey(args: unknown): EditableTemplateKey {
   const record = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
   const key = record["key"];
@@ -38,53 +26,104 @@ function requireEditableKey(args: unknown): EditableTemplateKey {
   return key as EditableTemplateKey;
 }
 
-/** True when ~/.scvn/templates/<key's filename> exists (a user override is present). */
-async function hasOverride(key: EditableTemplateKey): Promise<boolean> {
-  try {
-    await readFile(path.join(getTemplatesOverrideDir(), templateFilename(key)));
-    return true;
-  } catch {
-    return false;
+function requirePreset(args: unknown, state: TemplatePresets): string {
+  const value = (args as Record<string, unknown>)["preset"];
+  const preset = value === undefined ? state.selectedPreset : value;
+  if (typeof preset !== "string" || !state.presets.some(p => p.id === preset)) {
+    throw new Error("templates: unknown preset");
   }
+  return preset;
+}
+
+function requireContent(args: unknown): string {
+  const content = (args as Record<string, unknown>)["content"];
+  if (typeof content !== "string") throw new Error("templates: write requires string content");
+  return content;
+}
+
+
+// ponytail: serialize this host's small catalog mutations; use a file lock if multiple writers are supported.
+let mutation: Promise<unknown> = Promise.resolve();
+function mutate<T>(action: () => Promise<T>): Promise<T> {
+  const next = mutation.then(action);
+  mutation = next.catch(() => {});
+  return next;
 }
 
 export async function templatesRead(_session: unknown, args: unknown): Promise<TemplateContent> {
   const key = requireEditableKey(args);
-  const filename = templateFilename(key);
-  const [effectivePath, defaultPath] = await Promise.all([
-    resolveTemplateKey(key),
-    resolveTemplatePath(templateSourceFilename(key)),
-  ]);
-  const [content, defaultContent] = await Promise.all([
-    readFile(effectivePath, "utf8"),
-    readFile(defaultPath, "utf8"),
-  ]);
-  return { key, filename, content, defaultContent, isOverridden: await hasOverride(key) };
+  const state = await readTemplatePresets(key);
+  const defaultContent = await readFile(await resolveTemplatePath(templateSourceFilename(key)), "utf8");
+  const content = state.selectedPreset === "default"
+    ? defaultContent
+    : await readFile(templatePresetPath(key, state.selectedPreset), "utf8");
+  return { key, filename: templateFilename(key), ...state, content, defaultContent, isOverridden: content !== defaultContent };
 }
 
 export async function templatesWrite(_session: unknown, args: unknown): Promise<{ isOverridden: true }> {
-  const key = requireEditableKey(args);
-  const record = args as Record<string, unknown>;
-  const content = record["content"];
-  if (typeof content !== "string") {
-    throw new Error("templates: write requires string content");
-  }
-  const dir = getTemplatesOverrideDir();
-  await mkdir(dir, { recursive: true });
-  const dest = path.join(dir, templateFilename(key));
-  const temp = `${dest}.scvn-tmpl.tmp-${process.pid}`;
-  await writeFile(temp, content, "utf8");
-  await rename(temp, dest);
-  return { isOverridden: true };
+  return mutate(async () => {
+    const key = requireEditableKey(args);
+    const preset = requirePreset(args, await readTemplatePresets(key));
+    if (preset === "default") throw new Error("templates: Default is read-only; create a custom preset");
+    await writeTemplateFile(templatePresetPath(key, preset), requireContent(args));
+    return { isOverridden: true };
+  });
 }
 
-export async function templatesReset(_session: unknown, args: unknown): Promise<{ isOverridden: false }> {
-  const key = requireEditableKey(args);
-  const dest = path.join(getTemplatesOverrideDir(), templateFilename(key));
-  try {
-    await unlink(dest);
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-  }
-  return { isOverridden: false };
+export async function templatesCreate(_session: unknown, args: unknown): Promise<TemplateContent> {
+  return mutate(async () => {
+    const key = requireEditableKey(args);
+    const content = requireContent(args);
+    const state = await readTemplatePresets(key);
+    const rawName = (args as Record<string, unknown>)["name"];
+    if (typeof rawName !== "string" || !rawName.trim() || rawName.trim().length > 80 || /[\x00-\x1f\x7f]/.test(rawName)) {
+      throw new Error("templates: preset name must be 1–80 characters without control characters");
+    }
+    const name = rawName.trim();
+    if (state.presets.some(p => p.name.toLowerCase() === name.toLowerCase())) {
+      throw new Error("templates: preset name already exists");
+    }
+    const id = randomUUID();
+    const dest = templatePresetPath(key, id);
+    await writeTemplateFile(dest, content);
+    try {
+      await saveTemplatePresets(key, { selectedPreset: id, presets: [...state.presets, { id, name }] });
+    } catch (err) {
+      await unlink(dest);
+      throw err;
+    }
+    return templatesRead(null, { key });
+  });
+}
+
+export async function templatesSelect(_session: unknown, args: unknown): Promise<TemplateContent> {
+  return mutate(async () => {
+    const key = requireEditableKey(args);
+    const state = await readTemplatePresets(key);
+    const selectedPreset = requirePreset(args, state);
+    // Do not commit a selection whose saved content is missing or unreadable.
+    if (selectedPreset !== "default") await readFile(templatePresetPath(key, selectedPreset));
+    await saveTemplatePresets(key, { ...state, selectedPreset });
+    return templatesRead(null, { key });
+  });
+}
+
+export async function templatesDelete(_session: unknown, args: unknown): Promise<TemplateContent> {
+  return mutate(async () => {
+    const key = requireEditableKey(args);
+    const state = await readTemplatePresets(key);
+    const preset = requirePreset(args, state);
+    if (preset === "default") throw new Error("templates: Default cannot be removed");
+    // Publish the fallback before removing content so a failed catalog write loses nothing.
+    await saveTemplatePresets(key, {
+      selectedPreset: state.selectedPreset === preset ? "default" : state.selectedPreset,
+      presets: state.presets.filter(p => p.id !== preset),
+    });
+    try {
+      await unlink(templatePresetPath(key, preset));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    return templatesRead(null, { key });
+  });
 }

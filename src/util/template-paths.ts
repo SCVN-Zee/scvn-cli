@@ -9,6 +9,7 @@
  */
 
 import fs from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { getTemplatesOverrideDir } from "../config/paths.js";
 import { findInstallRoot } from "./install-root.js";
@@ -87,25 +88,111 @@ export async function resolveTemplatePath(filename: string): Promise<string> {
   return path.join(dir, filename);
 }
 
-/**
- * Convenience: resolve a template by its TemplateKey. A writable user override
- * at ~/.scvn/templates/<filename> is preferred over the bundled default, so the
- * desktop editor and the CLI share one effective template. The override dir is
- * probed every call (never cached) — the editor can create/remove it mid-session
- * and the next read must observe that immediately.
- */
-export async function resolveTemplateKey(
-  key: TemplateKey,
-  overrideRoot?: string,
-): Promise<string> {
-  const overridePath = path.join(getTemplatesOverrideDir(overrideRoot), templateFilename(key));
+export interface TemplatePresets {
+  selectedPreset: string;
+  presets: { id: string; name: string }[];
+}
+
+export function templatePresetsDir(key: TemplateKey, overrideRoot?: string): string {
+  return path.join(getTemplatesOverrideDir(overrideRoot), "presets", key);
+}
+
+/** Writable paths accept only generated custom IDs, never Default or user names. */
+export function templatePresetPath(key: TemplateKey, preset: string, overrideRoot?: string): string {
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(preset)) {
+    throw new Error("templates: invalid preset ID");
+  }
+  return path.join(templatePresetsDir(key, overrideRoot), preset);
+}
+
+/** Atomic writes shared by catalog migration and the desktop editor. */
+export async function writeTemplateFile(dest: string, content: string): Promise<void> {
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  const temp = `${dest}.scvn-tmpl.tmp-${randomUUID()}`;
   try {
-    await fs.access(overridePath);
-    return overridePath;
-  } catch {
-    return resolveTemplatePath(templateSourceFilename(key));
+    await fs.writeFile(temp, content, "utf8");
+    await fs.rename(temp, dest);
+  } finally {
+    await fs.unlink(temp).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== "ENOENT") throw err;
+    });
   }
 }
+
+export async function saveTemplatePresets(key: TemplateKey, state: TemplatePresets, overrideRoot?: string): Promise<void> {
+  await writeTemplateFile(path.join(templatePresetsDir(key, overrideRoot), "index.json"), JSON.stringify({ ...state, version: 2 }, null, 2) + "\n");
+}
+
+// ponytail: serialize in-process migration; use a file lock if multiple catalog writers are supported.
+let readingPresets: Promise<unknown> = Promise.resolve();
+export function readTemplatePresets(key: TemplateKey, overrideRoot?: string): Promise<TemplatePresets> {
+  const next = readingPresets.then(() => loadTemplatePresets(key, overrideRoot));
+  readingPresets = next.catch(() => {});
+  return next;
+}
+
+/** Fail closed on damaged metadata rather than silently applying the wrong template. */
+async function loadTemplatePresets(key: TemplateKey, overrideRoot?: string): Promise<TemplatePresets> {
+  let state: TemplatePresets & { version?: number };
+  try {
+    state = JSON.parse(await fs.readFile(path.join(templatePresetsDir(key, overrideRoot), "index.json"), "utf8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    state = { selectedPreset: "default", presets: [{ id: "default", name: "Default" }] };
+  }
+  if (!state || !Array.isArray(state.presets) || typeof state.selectedPreset !== "string" ||
+      (state.version !== undefined && state.version !== 2)) {
+    throw new Error("templates: invalid preset catalog");
+  }
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  for (const preset of state.presets) {
+    if (!preset || typeof preset.id !== "string" || typeof preset.name !== "string" ||
+        !preset.name.trim() || preset.name !== preset.name.trim() || preset.name.length > 80 ||
+        /[\x00-\x1f\x7f]/.test(preset.name) || ids.has(preset.id) || names.has(preset.name.toLowerCase())) {
+      throw new Error("templates: invalid preset catalog");
+    }
+    if (preset.id !== "default") templatePresetPath(key, preset.id, overrideRoot);
+    ids.add(preset.id);
+    names.add(preset.name.toLowerCase());
+  }
+  if (!ids.has(state.selectedPreset) || !state.presets.some(p => p.id === "default" && p.name === "Default")) {
+    throw new Error("templates: invalid preset catalog");
+  }
+  if (state.version !== 2) {
+    let previous: string;
+    try {
+      previous = await fs.readFile(path.join(getTemplatesOverrideDir(overrideRoot), templateFilename(key)), "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      return state;
+    }
+    let name = "Previous Default";
+    for (let suffix = 2; names.has(name.toLowerCase()); suffix++) name = "Previous Default " + suffix;
+    const id = randomUUID();
+    const dest = templatePresetPath(key, id, overrideRoot);
+    await writeTemplateFile(dest, previous);
+    state.presets.push({ id, name });
+    if (state.selectedPreset === "default") state.selectedPreset = id;
+    try {
+      await saveTemplatePresets(key, state, overrideRoot);
+    } catch (err) {
+      await fs.unlink(dest);
+      throw err;
+    }
+    // Leave the old file untouched as a backup. Version 2 prevents re-import after deletion.
+  }
+  return { selectedPreset: state.selectedPreset, presets: state.presets };
+}
+
+/** Default is always the bundled artifact; only named custom presets have writable files. */
+export async function resolveTemplateKey(key: TemplateKey, overrideRoot?: string): Promise<string> {
+  const { selectedPreset } = await readTemplatePresets(key, overrideRoot);
+  return selectedPreset === "default"
+    ? resolveTemplatePath(templateSourceFilename(key))
+    : templatePresetPath(key, selectedPreset, overrideRoot);
+}
+
 
 /** @internal Reset cached templates dir (for tests). */
 export function _resetTemplatesDir(): void {

@@ -1,13 +1,4 @@
-/**
- * globals.css — Tailwind v4 + shadcn-style design tokens (dark-only).
- *
- * The scvn desktop app ships a single cool-dark theme. Tokens follow the shadcn
- * naming contract (`--background`, `--card`, `--primary`, `--sidebar-*`, …) and
- * are mapped into Tailwind's theme via `@theme inline`, so utilities like
- * `bg-background`, `text-muted-foreground`, and `border-border` resolve. Custom
- * easing curves (from Emil Kowalski's motion guidance) power the sidebar/UI
- * transitions; UI motion stays under 300ms.
- */
+/* Shared Radix/shadcn tokens, following the native system appearance. */
 
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -18,11 +9,11 @@
 
   --radius: 0.625rem;
 
-  --background: oklch(0.16 0.006 265);
-  --foreground: oklch(0.97 0.003 265);
+  --background: #1b1d21;
+  --foreground: #f0f1f3;
 
-  --card: oklch(0.198 0.006 265);
-  --card-foreground: oklch(0.97 0.003 265);
+  --card: #22252a;
+  --card-foreground: #f0f1f3;
 
   --popover: oklch(0.21 0.006 265);
   --popover-foreground: oklch(0.97 0.003 265);
@@ -34,7 +25,7 @@
   --secondary-foreground: oklch(0.97 0.003 265);
 
   --muted: oklch(0.255 0.006 265);
-  --muted-foreground: oklch(0.7 0.012 265);
+  --muted-foreground: #adb2bd;
 
   --accent: oklch(0.28 0.008 265);
   --accent-foreground: oklch(0.97 0.003 265);
@@ -45,25 +36,60 @@
   --success: oklch(0.72 0.16 155);
   --warning: oklch(0.8 0.14 80);
 
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 12%);
+  --border: #383c44;
+  --input: #555b67;
   --ring: oklch(0.769 0.165 70);
 
-  --sidebar: oklch(0.14 0.006 265);
-  --sidebar-foreground: oklch(0.96 0.003 265);
+  --sidebar: #17191d;
+  --sidebar-foreground: #f0f1f3;
   --sidebar-primary: oklch(0.769 0.165 70);
   --sidebar-primary-foreground: oklch(0.24 0.03 66);
-  --sidebar-accent: oklch(0.245 0.006 265);
-  --sidebar-accent-foreground: oklch(0.97 0.003 265);
-  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-accent: #34302a;
+  --sidebar-accent-foreground: #ffd18a;
+  --sidebar-border: #383c44;
   --sidebar-ring: oklch(0.769 0.165 70);
 
-  --sidebar-width: 16rem;
-  --sidebar-width-icon: 3.25rem;
+  --sidebar-width: 14rem;
+  --sidebar-width-icon: 3.75rem;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --background: #f3f4f6;
+    --foreground: #20242c;
+    --card: #fcfcfd;
+    --card-foreground: #20242c;
+    --popover: #fcfcfd;
+    --popover-foreground: #20242c;
+    --primary: #f3ae3d;
+    --primary-foreground: #30200c;
+    --secondary: #e7e9ee;
+    --secondary-foreground: #303641;
+    --muted: #e7e9ee;
+    --muted-foreground: #5c6370;
+    --accent: #e9ebef;
+    --accent-foreground: #20242c;
+    --destructive: #b52c35;
+    --destructive-foreground: #fcfcfd;
+    --success: #207448;
+    --warning: #88600a;
+    --border: #d9dce2;
+    --input: #929aa7;
+    --ring: #966010;
+    --sidebar: #eceef2;
+    --sidebar-foreground: #20242c;
+    --sidebar-primary: #81500b;
+    --sidebar-primary-foreground: #fcfcfd;
+    --sidebar-accent: #f7e6c8;
+    --sidebar-accent-foreground: #704408;
+    --sidebar-border: #d5d8df;
+    --sidebar-ring: #966010;
+  }
 }
 
 @theme inline {
@@ -178,5 +204,44 @@
 @keyframes onboarding-fade {
   from {
     opacity: 0;
+  }
+}
+
+/* Workspace spacing preserves each view's scrolling contract. */
+.app-content > div { padding: 32px; }
+[data-slot="card"] { box-shadow: none; }
+[data-slot="card-title"] {
+  font-size: 1.25rem;
+  line-height: 1.3;
+  letter-spacing: -0.025em;
+}
+[data-slot="card-description"] { line-height: 1.65; max-width: 65ch; }
+[data-slot="select-trigger"], [data-slot="textarea"] {
+  background-color: var(--background);
+  border-color: var(--input);
+}
+[data-slot="select-trigger"] { min-height: 40px; }
+button, input, textarea, select { -webkit-app-region: no-drag; }
+button:not(:disabled), [role="switch"]:not(:disabled) { cursor: pointer; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.app-sidebar [aria-current="page"] svg { color: var(--sidebar-accent-foreground); }
+@media (max-width: 767px) {
+  .app-sidebar { width: 10.5rem; }
+  .app-sidebar[data-collapsed="true"] { width: var(--sidebar-width-icon); }
+  .app-sidebar > div:has(img) { padding-inline: 12px; }
+  .app-sidebar nav { padding-inline: 8px; }
+  .app-content > div { padding: 16px; }
+  [data-slot="card-header"], [data-slot="card-content"], [data-slot="card-footer"] {
+    padding-inline: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }

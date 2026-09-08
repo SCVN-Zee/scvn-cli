@@ -200,7 +200,7 @@ export function AppShell({
 
   return (
     <>
-      <div aria-hidden={setupOpen} inert={setupOpen} className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+      <div aria-hidden={setupOpen} inert={setupOpen} className="app-shell flex h-dvh w-full overflow-hidden bg-background text-foreground">
         <Sidebar
           items={items}
           selectedId={selectedId}
@@ -211,12 +211,14 @@ export function AppShell({
         />
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="app-drag h-8 shrink-0" />
-          <header className="flex h-14 shrink-0 items-center border-b border-border px-4">
-            <h1 className="truncate text-sm font-medium">{title}</h1>
+          <header className="app-drag flex h-16 shrink-0 items-center gap-3 border-b border-border px-6">
+            <span className="text-sm text-muted-foreground">Workspace</span>
+            <span aria-hidden="true" className="text-muted-foreground">/</span>
+            <h1 id="page-title" className="truncate text-sm font-semibold">{title}</h1>
           </header>
           <UpdateBanner />
           {banner ? <div onClickCapture={rememberSetupOpener}>{banner}</div> : null}
-          <main className="min-h-0 flex-1 overflow-auto">{children}</main>
+          <main aria-labelledby="page-title" className="app-content min-h-0 flex-1 overflow-auto">{children}</main>
         </div>
       </div>
       <SetupDialog open={setupOpen} openerFallback={setupOpenerRef.current}>{setup}</SetupDialog>

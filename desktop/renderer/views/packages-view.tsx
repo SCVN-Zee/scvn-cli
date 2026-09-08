@@ -32,7 +32,7 @@ import { invokeForResult, pickDirectories } from "@/lib/bridge";
 import {
   buildPackageTree,
   collectPackageRelPaths,
-  firstLevelFolderPaths,
+  allFolderPaths,
   type PackageTreeNode,
 } from "@/lib/package-tree";
 import { cn } from "@/lib/utils";
@@ -309,7 +309,7 @@ export function PackagesView({ onRun }: PackagesViewProps): React.JSX.Element {
         const rows = (raw as PackagesLibraryModel).packages;
         setLibrary(rows);
         setSelected(rows.map((r) => r.relPath));
-        setExpanded(new Set(firstLevelFolderPaths(buildPackageTree(rows))));
+        setExpanded(new Set(allFolderPaths(buildPackageTree(rows))));
       })
       .catch((err: unknown) => {
         if (!cancelled)

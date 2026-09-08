@@ -8,7 +8,7 @@
  *
  * Flow:
  *   1. macOS guard (non-darwin → log error + non-zero exit)
- *   2. precheck: detectForkRunning + detectBeyondCompare + detectUnityVersions
+ *   2. precheck: detectForkRunning + detectUnityVersions
  *      → abort on blocker; a RUNNING FORK IS NOT A BLOCKER — warned here, then
  *      at apply: DEDICATED ASK → graceful quit-and-wait → write → reopen.
  *      (Fork flushes its prefs on quit and would clobber the write otherwise.)
@@ -20,7 +20,6 @@
  * Flags:
  *   -y / autoYes  — skip confirmation prompt (confirm gate auto-approved)
  *   -n / dryRun   — no writes (writer skipped), dry-run label shown
- *   --no-beyond-compare — skip configuring Beyond Compare as Fork's diff tool
  */
 
 import process from "node:process";
@@ -29,7 +28,6 @@ import type { OutputAdapter } from "../ui/output.js";
 import { realPrompt } from "../ui/prompt.js";
 import type { PromptAdapter } from "../ui/prompt.js";
 import { detectForkRunning } from "../detectors/detect-fork-running.js";
-import { detectBeyondCompare } from "../detectors/detect-beyond-compare.js";
 import { detectUnityVersions } from "../detectors/detect-unity-versions.js";
 import type { UnityVersionInfo } from "../detectors/detect-unity-versions.js";
 import { writeForkPrefs } from "../writers/write-fork-prefs.js";
@@ -42,8 +40,6 @@ import { quitForkApp, reopenForkApp, FORK_QUIT_TIMEOUT_MESSAGE } from "../lib/qu
 export interface ForkArgs {
   dryRun?:  boolean;
   autoYes?: boolean;
-  /** Configure Beyond Compare as Fork's diff tool. Default true; `--no-beyond-compare` sets false. */
-  beyondCompare?: boolean;
 }
 
 /** macOS-only message — Fork.app and `defaults write` are macOS-specific. */
@@ -67,8 +63,6 @@ export interface ForkPreflight {
   spinnerLabel: string | null;
   /** True when Fork.app is currently running — warn + auto-quit at apply, NOT a blocker. */
   forkRunning: boolean;
-  /** Beyond Compare path when found, else null. */
-  beyondComparePath: string | null;
   /** Detected Unity editors (empty when none / non-darwin). */
   unityVersions: UnityVersionInfo[];
 }
@@ -93,48 +87,29 @@ export interface ForkExecuteResult {
  * Never prompts or logs; returns a structured result the caller renders.
  * May throw if a detector fails — callers wrap as they see fit.
  */
-export async function forkPreflight(
-  opts: { requireBeyondCompare?: boolean } = {},
-): Promise<ForkPreflight> {
-  const requireBeyondCompare = opts.requireBeyondCompare ?? true;
+export async function forkPreflight(): Promise<ForkPreflight> {
   if (process.platform !== "darwin") {
-    return { ok: false, blocker: FORK_MACOS_ONLY_MESSAGE, spinnerLabel: FORK_MACOS_ONLY_MESSAGE, forkRunning: false, beyondComparePath: null, unityVersions: [] };
+    return { ok: false, blocker: FORK_MACOS_ONLY_MESSAGE, spinnerLabel: FORK_MACOS_ONLY_MESSAGE, forkRunning: false, unityVersions: [] };
   }
 
-  const [beyondCompare, unityVersions, forkRunning] = await Promise.all([
-    detectBeyondCompare(),
+  const [unityVersions, forkRunning] = await Promise.all([
     detectUnityVersions(),
     detectForkRunning(),
   ]);
-  const beyondComparePath = beyondCompare.found ? beyondCompare.path : null;
 
   // A running Fork is NOT a blocker: warn at this step, then quit-and-wait
   // at apply (see forkExecute). Fork must simply be gone before the write.
-  // Beyond Compare is a prerequisite only when the caller intends to configure
-  // it as Fork's diff tool. When opted out, a missing BC is not a blocker — the
-  // Unity merge-tool half is configured regardless.
-  if (requireBeyondCompare && !beyondCompare.found) {
-    return {
-      ok: false,
-      blocker: "Beyond Compare not found at /Applications/Beyond Compare.app. Install it first.",
-      spinnerLabel: "Beyond Compare not found",
-      forkRunning,
-      beyondComparePath: null,
-      unityVersions,
-    };
-  }
   if (unityVersions.length === 0) {
     return {
       ok: false,
       blocker: "No Unity editor found under /Applications/Unity/Hub/Editor. Install via Unity Hub.",
       spinnerLabel: "No Unity editor found",
       forkRunning,
-      beyondComparePath,
       unityVersions: [],
     };
   }
 
-  return { ok: true, blocker: null, spinnerLabel: null, forkRunning, beyondComparePath, unityVersions };
+  return { ok: true, blocker: null, spinnerLabel: null, forkRunning, unityVersions };
 }
 
 // ---------------------------------------------------------------------------
@@ -146,11 +121,11 @@ export async function forkPreflight(
 // ---------------------------------------------------------------------------
 
 export async function forkExecute(
-  params: { yamlMergePath: string; dryRun: boolean; setupBeyondCompare: boolean; autoApproveQuit?: boolean },
+  params: { yamlMergePath: string; dryRun: boolean; autoApproveQuit?: boolean },
   prompt: PromptAdapter = realPrompt,
   output: OutputAdapter = realOutput,
 ): Promise<ForkExecuteResult> {
-  const { yamlMergePath, dryRun, setupBeyondCompare } = params;
+  const { yamlMergePath, dryRun } = params;
   const autoApproveQuit = params.autoApproveQuit ?? false;
   const applyLabel = dryRun ? "Apply  [dry-run]" : "Apply";
 
@@ -205,7 +180,7 @@ export async function forkExecute(
     if (result.ok) {
       applySpinner.message(`${applyLabel}  writing Fork prefs…`);
       try {
-        const written = await writeForkPrefs({ yamlMergePath, setupBeyondCompare });
+        const written = await writeForkPrefs({ yamlMergePath });
         result = { ok: true, backupPath: written.backupPath };
       } catch (err: unknown) {
         result = { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -225,9 +200,7 @@ export async function forkExecute(
   }
 
   // Summary — log results
-  const label = setupBeyondCompare
-    ? "Fork prefs (externalDiffTool/mergeTool)"
-    : "Fork prefs (mergeTool)";
+  const label = "Fork prefs (mergeTool)";
   if (result.ok) {
     output.log.success("Succeeded (1):");
     output.log.step(`  - ${label}${result.backupPath ? `  (backup: ${result.backupPath})` : ""}`);
@@ -279,7 +252,6 @@ export async function runFork(
 
   const dryRun  = args.dryRun  ?? false;
   const autoYes = args.autoYes ?? false;
-  const beyondCompare = args.beyondCompare ?? true;
 
   output.intro("scvn fork");
 
@@ -289,7 +261,7 @@ export async function runFork(
 
   let pre: ForkPreflight;
   try {
-    pre = await forkPreflight({ requireBeyondCompare: beyondCompare });
+    pre = await forkPreflight();
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     precheckSpinner.stop(`precheck failed: ${message}`, 1);
@@ -341,9 +313,6 @@ export async function runFork(
     "",
     ...(pre.forkRunning ? ["Fork is running — you will be asked to quit it (it reopens afterwards).", ""] : []),
     "Fork prefs (defaults write com.DanPristupov.Fork):",
-    ...(beyondCompare
-      ? [`   externalDiffTool = 1  (Beyond Compare @ ${pre.beyondComparePath})`]
-      : ["   externalDiffTool = (unchanged — Beyond Compare setup skipped)"]),
     "   mergeTool        = 8  (Custom)",
     `   externalMergeToolCustomPath = ${pickedUnity.yamlMergePath}`,
   ].join("\n");
@@ -368,7 +337,7 @@ export async function runFork(
   // Step 4-5: apply + summary via the shared execute half. The quit-ask (and
   // reopen, when approved) lives inside forkExecute so the GUI gets it too.
   const result = await forkExecute(
-    { yamlMergePath: pickedUnity.yamlMergePath, dryRun, setupBeyondCompare: beyondCompare, autoApproveQuit: autoYes },
+    { yamlMergePath: pickedUnity.yamlMergePath, dryRun, autoApproveQuit: autoYes },
     prompt,
     output,
   );

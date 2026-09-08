@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildPackageTree,
   collectPackageRelPaths,
-  firstLevelFolderPaths,
+  allFolderPaths,
   splitRelPath,
 } from "../../desktop/renderer/lib/package-tree.ts";
 
@@ -96,7 +96,7 @@ describe("buildPackageTree", () => {
   });
 });
 
-describe("collectPackageRelPaths / firstLevelFolderPaths", () => {
+describe("collectPackageRelPaths / allFolderPaths", () => {
   const tree = buildPackageTree([
     pkg("Sirenix", "Plugins/Sirenix"),
     pkg("DOTween", "Plugins/Demigiant/DOTween"),
@@ -109,7 +109,7 @@ describe("collectPackageRelPaths / firstLevelFolderPaths", () => {
     expect(collectPackageRelPaths(plugins).sort()).toEqual(["Plugins/Demigiant/DOTween", "Plugins/Sirenix"]);
   });
 
-  it("defaults expansion to first-level folders only", () => {
-    expect(firstLevelFolderPaths(tree)).toEqual(["Plugins", "Supercent"]);
+  it("expands nested folders without including leaf packages", () => {
+    expect(allFolderPaths(tree)).toEqual(["Plugins", "Plugins/Demigiant", "Supercent"]);
   });
 });

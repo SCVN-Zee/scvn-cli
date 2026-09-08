@@ -52,7 +52,6 @@ Flags:
   --no-resources   omit MCP resources from generated config
   --force          scvn mcp: override a refusing gate (installed, pin skew, Unity open)
   --purge-nuget    scvn mcp uninstall: also remove Assets/Plugins/NuGet
-  --no-beyond-compare  scvn fork: skip configuring Beyond Compare as the diff tool
   -h, --help       Show this help
   --version        Print version
 `.trim();

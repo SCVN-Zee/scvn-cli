@@ -22,7 +22,7 @@
     "desktop:build:renderer": "vite build",
     "desktop:build:assets": "node -e \"const {cpSync}=require('node:fs');cpSync('templates','dist-desktop/templates',{recursive:true})\"",
     "desktop:build": "npm run desktop:build:main && npm run desktop:build:renderer && npm run desktop:build:assets",
-    "desktop:start": "electron dist-desktop/main.cjs",
+    "desktop:start": "node desktop/scripts/start.mjs",
     "desktop:pack": "npm run desktop:build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --config electron-builder.yml --publish never",
     "desktop:release": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish never",
     "desktop:publish": "npm run desktop:build && electron-builder --mac --config electron-builder.yml --publish always",

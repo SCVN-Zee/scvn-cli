@@ -6,12 +6,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
-
-const require = createRequire(import.meta.url);
-const electronPath = require("electron"); // path to the Electron executable
+import { electronPath } from "./electron.mjs";
 const mainEntry = fileURLToPath(new URL("../../dist-desktop/main.cjs", import.meta.url));
 
 function run(cmd, args) {

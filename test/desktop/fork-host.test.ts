@@ -49,7 +49,6 @@ describe("fork host handler", () => {
       blocker: null,
       spinnerLabel: null,
       forkRunning: false,
-      beyondComparePath: null,
       unityVersions: UNITY,
     });
   });
@@ -58,7 +57,6 @@ describe("fork host handler", () => {
     forkMocks.forkExecute.mockResolvedValue({ ok: false, error: "Fork did not quit in time — quit Fork manually and re-run." });
 
     const result = (await capabilities.fork(stubSession(), {
-      setupBeyondCompare:   false,
       applyMergeAttributes: true,
       mergeTarget:          "/tmp/proj",
     })) as { ok: boolean; error?: string };
@@ -73,7 +71,6 @@ describe("fork host handler", () => {
     mergeMocks.setupMergeAttributes.mockResolvedValue({ status: "ok", detail: "wrote marker block" });
 
     const result = (await capabilities.fork(stubSession(), {
-      setupBeyondCompare:   false,
       applyMergeAttributes: true,
       mergeTarget:          "/tmp/proj",
     })) as { ok: boolean };

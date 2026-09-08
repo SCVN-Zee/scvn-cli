@@ -1,13 +1,7 @@
-/**
- * test/util/template-paths-override.test.ts — resolveTemplateKey's user-override
- * layer. The override root is injected (getTemplatesOverrideDir(overrideRoot)),
- * so no real ~/.scvn is touched. Proves: bundled fallback with no override,
- * override wins when present, and the probe is NOT cached (an override created
- * after a miss is seen on the next call).
- */
+/** Legacy override import and uncached preset resolution, with an isolated storage root. */
 
 import { describe, it, expect } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpDir } from "../helpers/tmp-dir.js";
 import {
@@ -15,7 +9,7 @@ import {
   resolveTemplatePath,
 } from "../../src/util/template-paths.js";
 
-describe("resolveTemplateKey — user override layer", () => {
+describe("resolveTemplateKey — legacy customization import", () => {
   it("falls back to the bundled path when no override exists", async () => {
     const root = await tmpDir();
     const resolved = await resolveTemplateKey("gitignore", root);
@@ -24,14 +18,16 @@ describe("resolveTemplateKey — user override layer", () => {
     expect(resolved).toBe(await resolveTemplatePath("gitignore"));
   });
 
-  it("prefers the override file under <root>/templates when present", async () => {
+  it("imports the old override as custom content rather than redefining bundled Default", async () => {
     const root = await tmpDir();
     const dir = path.join(root, "templates");
     await mkdir(dir, { recursive: true });
     const override = path.join(dir, ".gitignore");
     await writeFile(override, "# override\n");
 
-    expect(await resolveTemplateKey("gitignore", root)).toBe(override);
+    const resolved = await resolveTemplateKey("gitignore", root);
+    expect(resolved).not.toBe(override);
+    expect(await readFile(resolved, "utf8")).toBe("# override\n");
   });
 
   it("probes every call — an override created after a miss is seen (not cached)", async () => {
@@ -47,6 +43,6 @@ describe("resolveTemplateKey — user override layer", () => {
     await writeFile(override, "# custom lfs\n");
 
     // Second call sees the freshly written override — no stale cache.
-    expect(await resolveTemplateKey("gitattributesLfs", root)).toBe(override);
+    expect(await readFile(await resolveTemplateKey("gitattributesLfs", root), "utf8")).toBe("# custom lfs\n");
   });
 });

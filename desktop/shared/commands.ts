@@ -161,7 +161,7 @@ export type EditableTemplateKey =
   | "gitattributesMerge";
 
 /**
- * The set the host accepts for read/write/reset. Keys match the CLI TemplateKey
+ * The set the host accepts for preset operations. Keys match the CLI TemplateKey
  * names so the host maps them straight through resolveTemplateKey and derives
  * each filename from templateFilename(key) — no duplicated filename table.
  */
@@ -176,9 +176,12 @@ export const EDITABLE_TEMPLATE_KEYS: EditableTemplateKey[] = [
 export interface TemplateContent {
   key: EditableTemplateKey;
   filename: string;
-  /** Effective content: the override if present, else the bundled default. */
+  /** Persisted active preset; Default is always bundled, read-only and non-removable. */
+  selectedPreset: string;
+  presets: { id: string; name: string }[];
+  /** Content of the selected preset. */
   content: string;
-  /** The bundled default, always — used to show what "reset" would restore. */
+  /** Read-only bundled content for Default. */
   defaultContent: string;
   isOverridden: boolean;
 }
@@ -294,7 +297,7 @@ export const ALL_CAPABILITIES: CapabilitySpec[] = [
   {
     id: "fork",
     label: "Fork",
-    description: "Configure Fork.app for Unity YAML merges (Beyond Compare + editor).",
+    description: "Configure Fork.app for Unity YAML merges with a Unity editor.",
     form: true,
     launch: [],
   },

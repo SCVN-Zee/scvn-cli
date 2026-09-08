@@ -53,6 +53,10 @@ Choose **Skip for now** to enter the app without finishing; a banner reminds
 you and onboarding reappears on the next launch until the projects root is
 saved.
 
+The interface follows macOS light/dark appearance and reduced-motion settings.
+Use the sidebar chevron or **Cmd+B** to toggle the compact icon rail; your choice
+is remembered between sessions.
+
 ---
 
 ## The tabs
@@ -67,8 +71,6 @@ assets (`.meta`, scenes, prefabs) with Unity's own `UnityYAMLMerge` instead of
 plain text merge.
 
 - **Unity editor** — pick which installed editor version performs merges.
-- **Configure Beyond Compare (diff tool)** — optional; on by default when
-  Beyond Compare is installed.
 - **Also write Unity merge .gitattributes to a project** — optional second
   half: writes the smart-merge block into a chosen project's `.gitattributes`
   (pick the project when enabled; the ✎ icon lets you edit the template
@@ -94,9 +96,16 @@ Below the ops: a live **ignore=dirty** toggle per git submodule. Flipping a
 toggle applies immediately to the repo's local `.git/config` only — never to
 the tracked `.gitmodules`.
 
-Template edits made via the ✎ icons are saved under `~/.scvn/templates/` and
-are honored by the CLI too; **Reset to default** in the editor removes the
-override.
+Each template editor supports multiple named presets. **Default** is always the
+bundled content: read-only and non-removable. Choose **Add new preset…** at the
+bottom of the preset dropdown, enter a name, and **Create** to copy the current
+editor content into a selected custom preset. **Cancel** leaves the current
+preset and draft untouched. Edit and **Save** your template. Select a preset to use
+it globally in both the desktop app and CLI. Choose **Default** to use bundled
+content without changing saved custom presets. **Discard changes** restores
+the current preset’s last saved content. Deleting the selected custom preset
+returns to Default. Old Default overrides are imported once as a custom
+**Previous Default** preset. Presets live under `~/.scvn/templates/`.
 
 ### Packages — shared library
 
@@ -162,8 +171,7 @@ during onboarding or in Settings → Config.
 
 **Fork tab shows a blocker**
 Fork.app isn't installed (or wasn't found). Install Fork and re-open the tab.
-Beyond Compare is optional — without it, only the Unity merge tool is
-configured.
+Fork setup configures only the Unity merge tool and leaves your diff tool unchanged.
 
 **Doctor warns about git-lfs**
 Git LFS is only needed for the Git setup **Install Git LFS** op. Install it
@@ -181,7 +189,7 @@ released builds — see [`scvn mcp` in CLI.md](CLI.md#scvn-mcp--vendor-unity-mcp
 |---|---|
 | `~/.scvn/config` | App configuration (the Unity projects root) |
 | `~/.scvn/store/` | The staged package library |
-| `~/.scvn/templates/` | Your template overrides (`.gitignore`, exclude, LFS/merge blocks) |
+| `~/.scvn/templates/` | Custom presets, selections, and legacy override backups |
 
 ## The command line
 

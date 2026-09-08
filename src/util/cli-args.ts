@@ -10,7 +10,6 @@ export interface ParsedArgs {
   lfs: boolean;
   force: boolean;
   purgeNuget: boolean;
-  beyondCompare: boolean;
   namespace: string | null;
   subcommands: string[];
   from?: string;
@@ -40,7 +39,6 @@ export function parseArgv(argv: string[]): ParsedArgs {
   let lfs = false;
   let force = false;
   let purgeNuget = false;
-  let beyondCompare = true;
   let agent: string | undefined;
   let enableAllTools = true;
   let enableAllPrompts = true;
@@ -78,7 +76,6 @@ export function parseArgv(argv: string[]): ParsedArgs {
       case "--lfs": lfs = true; continue;
       case "--force": force = true; continue;
       case "--purge-nuget": purgeNuget = true; continue;
-      case "--no-beyond-compare": beyondCompare = false; continue;
       case "--enable-all-tools": enableAllTools = true; continue;
       case "--enable-all-prompts": enableAllPrompts = true; continue;
       case "--enable-all-resources": enableAllResources = true; continue;
@@ -112,7 +109,7 @@ export function parseArgv(argv: string[]): ParsedArgs {
   const namespace = positionals[0] !== undefined && KNOWN_NAMESPACES.has(positionals[0]) ? positionals[0] : null;
   const subcommands = namespace === null ? positionals : positionals.slice(1);
   return {
-    help, version, dryRun, autoYes, ignore, exclude, lfs, force, purgeNuget, beyondCompare,
+    help, version, dryRun, autoYes, ignore, exclude, lfs, force, purgeNuget,
     namespace, subcommands, from, to, target, store, addons, agent,
     enableAllTools, enableAllPrompts, enableAllResources, name, layout, warnings,
   };

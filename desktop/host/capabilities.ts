@@ -19,7 +19,7 @@ import { runMcp } from "../../src/commands/mcp.js";
 import { runPackages } from "../../src/commands/packages.js";
 import { ignoreDirtyList, ignoreDirtySet } from "./ignore-dirty.js";
 import { discoverSetupTargetsRich } from "../../src/commands/shared/select-setup-target.js";
-import { templatesRead, templatesWrite, templatesReset } from "./templates.js";
+import { templatesRead, templatesWrite, templatesCreate, templatesSelect, templatesDelete } from "./templates.js";
 import { setupMergeAttributes } from "../../src/features/setup/setup-merge-attributes.js";
 import { loadConfig } from "../../src/config/load.js";
 import { resolveProjectsRoot } from "../../src/commands/shared/project-discovery.js";
@@ -106,7 +106,7 @@ export const capabilities: CommandRegistry = {
   async "fork:prepare"(): Promise<unknown> {
     let pre: ForkPreflight;
     try {
-      pre = await forkPreflight({ requireBeyondCompare: false });
+      pre = await forkPreflight();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       return {
@@ -129,15 +129,6 @@ export const capabilities: CommandRegistry = {
       default: pre.unityVersions[0]!.editorPath,
       options: pre.unityVersions.map((v) => ({ value: v.editorPath, label: v.version })),
     };
-    // Beyond Compare diff-tool setup is optional. Default on when BC is present,
-    // off when absent — turning it on without BC installed surfaces the honest
-    // "Beyond Compare not found" block at Apply.
-    const setupBcField: LaunchField = {
-      name: "setupBeyondCompare",
-      label: "Configure Beyond Compare (diff tool)",
-      type: "boolean",
-      default: pre.beyondComparePath !== null,
-    };
     // Optional git-side half: write the Unity smart-merge `.gitattributes`
     // block to a chosen project. Off by default (Fork prefs are machine-level;
     // this one touches a repo). The pen edits the `gitattributes-merge`
@@ -155,13 +146,11 @@ export const capabilities: CommandRegistry = {
       type: "project",
       visibleWhen: { field: "applyMergeAttributes", equals: "true" },
     };
-    const baseNote = pre.beyondComparePath !== null
-      ? `Beyond Compare @ ${pre.beyondComparePath} · writes Fork.app prefs`
-      : "Beyond Compare not found · the Unity merge tool is still configured";
+    const baseNote = "Configures Unity merge tool · leaves diff tool unchanged";
     return {
       // Warned, not blocked: Apply asks before quitting, then reopens Fork.
       note: pre.forkRunning ? `${baseNote} · Fork is running — Apply asks to quit it, then reopens it` : baseNote,
-      fields: [editorField, setupBcField, applyMergeField, mergeTargetField],
+      fields: [editorField, applyMergeField, mergeTargetField],
     } satisfies FormModel;
   },
 
@@ -170,15 +159,14 @@ export const capabilities: CommandRegistry = {
     const output = createGuiOutput(session);
     const prompt = createGuiPrompt(session);
 
-    const setupBeyondCompare = bool(record, "setupBeyondCompare");
-    const pre = await forkPreflight({ requireBeyondCompare: setupBeyondCompare });
+    const pre = await forkPreflight();
     if (!pre.ok) {
       output.log.error(pre.blocker ?? "Prerequisites not met");
       return { ok: false };
     }
     const editorPath = str(record, "editorPath") ?? pre.unityVersions[0]!.editorPath;
     const picked = pre.unityVersions.find((v) => v.editorPath === editorPath) ?? pre.unityVersions[0]!;
-    const result = await forkExecute({ yamlMergePath: picked.yamlMergePath, dryRun: false, setupBeyondCompare }, prompt, output);
+    const result = await forkExecute({ yamlMergePath: picked.yamlMergePath, dryRun: false }, prompt, output);
 
     // Fork half failed (quit timeout / write error) → the git-side half must
     // not run: the user's approval was for a completed Fork setup, and a
@@ -228,7 +216,9 @@ export const capabilities: CommandRegistry = {
   // --- templates: per-feature inline editor (request/response, no prompts) --
   "templates:read": templatesRead,
   "templates:write": templatesWrite,
-  "templates:reset": templatesReset,
+  "templates:create": templatesCreate,
+  "templates:select": templatesSelect,
+  "templates:delete": templatesDelete,
 
   // --- mcp: local package and config lifecycle ---
   async "mcp:project-status"(_session: HostSession, args: unknown): Promise<unknown> {

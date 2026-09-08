@@ -85,9 +85,16 @@ export function collectPackageRelPaths<T extends TreePackage>(
 /** @deprecated Use collectPackageRelPaths — selection keys on relPath, not label. */
 export const collectPackageLabels = collectPackageRelPaths;
 
-/** Paths of root nodes that have children — the default expanded set. */
-export function firstLevelFolderPaths<T extends TreePackage>(
+/** Paths of all nodes that have children — the default expanded set. */
+export function allFolderPaths<T extends TreePackage>(
   nodes: readonly PackageTreeNode<T>[],
 ): string[] {
-  return nodes.filter((n) => n.children.length > 0).map((n) => n.path);
+  const paths: string[] = [];
+  const visit = (node: PackageTreeNode<T>): void => {
+    if (node.children.length === 0) return;
+    paths.push(node.path);
+    for (const child of node.children) visit(child);
+  };
+  for (const node of nodes) visit(node);
+  return paths;
 }

@@ -4,7 +4,7 @@
  * `window.scvn` is a global singleton injected by the preload script (and, in
  * browser verification, by a test stub). These helpers keep components free of
  * raw event plumbing: `invokeForResult` runs a request/response command
- * (`<id>:prepare`, `templates:read|write|reset`) and resolves its result value
+ * (`<id>:prepare`, `templates:*`) and resolves its result value
  * using a private listener, so it never disturbs an active run's event routing.
  * Streaming runs subscribe to `window.scvn.onEvent` directly (RunOpView) so the
  * listener is registered before the invoke, avoiding a first-event race.

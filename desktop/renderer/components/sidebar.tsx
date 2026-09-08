@@ -2,10 +2,8 @@
  * components/sidebar.tsx — Sticky, collapsible capability rail (shadcn style).
  *
  * Sits flush against the window's left edge at full height (it never scrolls
- * with the content pane). Collapses to a ~3.25rem icon rail; collapsed items
- * reveal their label in a right-side tooltip. Width animates with the iOS-style
- * drawer curve under 300ms. Controlled: `collapsed` + `onToggle` are owned by
- * the shell so a topbar button and a keyboard shortcut can drive the same state.
+ * with the content pane). Collapsed items retain accessible labels and tooltips.
+ * Controlled by the shell, with a keyboard shortcut and a visible toggle.
  */
 
 import { ChevronsLeft, ChevronsRight, CircleHelp } from "lucide-react";
@@ -51,17 +49,16 @@ function NavItem({
       data-active={active}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex w-full items-center gap-3 rounded-md px-2.5 h-9 text-sm outline-none",
-        "text-sidebar-foreground/75 transition-[color,background-color] duration-150 ease-[var(--ease-out)]",
+        "flex w-full items-center gap-3 rounded-md px-3 h-11 text-sm outline-none border border-transparent",
+        "text-muted-foreground transition-colors duration-150",
         "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-        active && "bg-sidebar-accent text-sidebar-accent-foreground font-medium",
+        active && "bg-sidebar-accent text-sidebar-accent-foreground border-sidebar-border font-semibold",
         collapsed && "justify-center px-0",
       )}
     >
       <Icon className="size-4 shrink-0" />
       <span className={cn("truncate", collapsed && "sr-only")}>{item.label}</span>
-      {active && !collapsed && <span className="ml-auto size-1.5 rounded-full bg-primary" />}
     </button>
   );
 
@@ -81,13 +78,12 @@ export function Sidebar({ items, selectedId, onSelect, collapsed, onToggle, onRe
     <aside
       data-collapsed={collapsed}
       className={cn(
-        "flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
-        "transition-[width] duration-200 ease-[var(--ease-drawer)]",
-        collapsed ? "w-[3.25rem]" : "w-64",
+        "app-sidebar flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
+        collapsed ? "w-[3.75rem]" : "w-56",
       )}
     >
       <div className="app-drag h-8 shrink-0" />
-      <div className={cn("flex h-14 items-center gap-2.5 px-3", collapsed && "justify-center px-0")}>
+      <div className={cn("flex h-16 items-center gap-2.5 px-4", collapsed && "justify-center px-0")}>
         <img
           src={logoUrl}
           alt="Supercent VN Tools"
@@ -97,7 +93,7 @@ export function Sidebar({ items, selectedId, onSelect, collapsed, onToggle, onRe
         {!collapsed && (
           <div className="flex min-w-0 flex-col leading-tight">
             <span className="truncate text-sm font-semibold">Supercent VN Tools</span>
-            <span className="truncate text-[10px] font-medium tracking-wider text-muted-foreground">
+            <span className="mt-1 truncate text-xs text-muted-foreground">
               {APP_VERSION ? `v${APP_VERSION}` : "Control Center"}
             </span>
           </div>
@@ -106,13 +102,13 @@ export function Sidebar({ items, selectedId, onSelect, collapsed, onToggle, onRe
 
       <Separator className="bg-sidebar-border" />
 
-      <nav className="min-h-0 flex-1 overflow-y-auto p-2">
+      <nav aria-label="Tools" className="min-h-0 flex-1 overflow-y-auto p-3">
         {!collapsed && (
-          <p className="px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <p className="px-3 pb-3 pt-3 text-xs font-medium text-muted-foreground">
             Tools
           </p>
         )}
-        <ul className="flex flex-col gap-0.5">
+        <ul className="flex flex-col gap-1">
           {mainItems.map((item) => (
             <li key={item.id}>
               <NavItem

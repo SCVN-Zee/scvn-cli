@@ -186,7 +186,7 @@ paths fail before creation. `-n` prints the plan without writing.
 Target resolution: `--target <Assets dir>` flag → `SCVN_TARGET` env →
 interactive picker. Under `-y` an explicit target is required — ops never
 auto-pick a project. `scvn fork` is the exception: it configures **Fork.app
-only** (the `defaults write` prefs — Beyond Compare diff + UnityYAMLMerge). It
+only** (the `defaults write` prefs — UnityYAMLMerge; diff preferences unchanged). It
 does not touch git config or any project's `.gitattributes`, so it needs no
 target, no `SCVN_PROJECTS_ROOT`, and no project selection (`--target` is ignored
 with a warning). Per-project git artifacts are `scvn git`'s job.
@@ -220,27 +220,45 @@ T=~/p/Game/Assets; scvn git --ignore --exclude --lfs --target $T -y && scvn igno
 > accidental `$HOME` repo) the wider blast radius is guarded exactly like prune:
 > refused under `-y`, confirmed interactively before anything is untracked.
 
-### Editable templates — the `~/.scvn/templates/` override layer
+### Template presets — bundled Default and user-created templates
 
-The three git artifacts are resolved through one read path that prefers a
-user-level override over the bundled default. Drop a file at
-`~/.scvn/templates/<name>` and both the CLI (`scvn git`) and the desktop app use
-it; delete it to fall back to the bundled default. The override dir is probed on
-every run (never cached), so an edit takes effect immediately — no restart.
+Each of the four git template types has its own presets and global selection.
+Both desktop and CLI resolve the selected preset on every run (never cached),
+so switching presets takes effect without a restart. **Default** always contains
+the bundled template and cannot be edited or removed. Create a custom
+preset to change template content.
 
-| Artifact | Override file |
+Existing overrides from older app versions are imported once as **Previous
+Default** custom presets (with a numeric suffix if the name is taken). If the
+old Default override was active, its imported preset stays selected; otherwise
+the existing custom selection stays unchanged. Original files remain as inert
+backups, not live Default overrides:
+
+| Artifact | Legacy override backup |
 |---|---|
 | `.gitignore` (`--ignore`) | `~/.scvn/templates/.gitignore` |
 | `.git/info/exclude` (`--exclude`) | `~/.scvn/templates/git-exclude` |
 | Git-LFS block (`--lfs`) | `~/.scvn/templates/gitattributes-lfs` |
+| Unity smart-merge block (`fork`) | `~/.scvn/templates/gitattributes-merge` |
 
-With no override present, every artifact produces byte-identical output to the
-bundled defaults. In the **desktop app's Git setup** view, each artifact toggle
-carries an **Edit template…** link that opens a focused editor: it shows the
-effective content with an override/default badge, **Save** writes the override,
-and **Reset to default** removes it. Because both surfaces share this
-read path, an edit made in the GUI is honored by a later `scvn git` run on the
-CLI.
+Open an editor with the pencil icon in **Git setup** or **Fork**. Choose
+**Add new preset…** at the bottom of the preset dropdown to reveal the
+**Name / Create / Cancel** form. **Create** copies the current editor content
+(including unsaved edits) into a newly selected custom preset. With Default
+selected, it copies bundled content. **Cancel** or Escape closes the form
+without changing the selected preset or draft. Edit and **Save** your custom
+template. Names must be non-blank and unique within that type
+(case-insensitive). Choose **Default** to use bundled content without
+overwriting any custom preset; switch back to resume using the saved custom
+content. **Discard changes** restores the current preset’s last saved content.
+Deleting the selected custom preset switches back to bundled Default; other
+custom presets are preserved.
+
+Custom content and the selection catalog live under
+`~/.scvn/templates/presets/<template-key>/`. After import, changes to the old
+backup files above have no effect. Deleting an imported preset does not import
+it again. Manage presets in the desktop editor; CLI commands automatically
+honor the selected preset.
 
 ### `scvn config` — edit configuration
 
