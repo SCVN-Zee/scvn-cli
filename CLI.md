@@ -129,8 +129,10 @@ each; `-n` previews everything.
 **Offline delivery.** `make pack` bundles the newest staged version plus the
 `unity-mcp-cli` closure, so a teammate with **no Node and no network** can unzip a
 bundle and run `scvn mcp install` (see "Deliver to a teammate"). `.mcp.json` is
-written by the real `unity-mcp-cli` — it carries a per-project port that cannot be
-derived, so scvn delegates rather than guesses.
+written by the real `unity-mcp-cli`, with an explicit local URL from the project’s
+`UserSettings/AI-Game-Developer-Config.json` (`host`). This preserves its port and
+project pinning instead of using the upstream `https://ai-game.dev` default.
+The host must be a loopback HTTP(S) address; non-local hosts are rejected.
 
 > **`uninstall` leaves `.mcp.json` behind.** That file can hold *other* MCP servers,
 > so removing it is not scvn's call. Delete it yourself if you want it gone.

@@ -601,6 +601,17 @@ export async function relocateMcpArtifacts(
   await mergeGeneratedConfig(configSource, configDestination, agent);
   return { configPath: configDestination };
 }
+async function localMcpHost(projectDir: string): Promise<string> {
+  const configPath = path.join(projectDir, "UserSettings", "AI-Game-Developer-Config.json");
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  const host = typeof config?.host === "string" ? new URL(config.host) : null;
+  if (!host || !["http:", "https:"].includes(host.protocol) ||
+      !["localhost", "127.0.0.1", "[::1]"].includes(host.hostname) ||
+      host.username || host.password) {
+    throw new McpStageError("setup-mcp", `Set a local MCP host in ${configPath}`);
+  }
+  return host.href;
+}
 async function runMcpArtifactPhase(
   opts: McpLifecycleOptions,
   resolved: { target: string; projectDir: string; repoRoot: string },
@@ -643,7 +654,9 @@ async function runMcpArtifactPhase(
     await command(
       lifecycleOpts,
       "setup-mcp",
-      ["setup-mcp", agent.value, resolved.projectDir],
+      ["setup-mcp", agent.value, resolved.projectDir, "--url", opts.dryRun
+        ? "<local host from UserSettings/AI-Game-Developer-Config.json>"
+        : await localMcpHost(resolved.projectDir)],
       resolved.projectDir,
     );
     if (!opts.dryRun) {

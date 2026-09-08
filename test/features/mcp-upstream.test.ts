@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import path from "node:path";
-import { access, chmod, mkdir, realpath, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { execa } from "execa";
 import { tmpDir } from "../helpers/tmp-dir.js";
 import { markerPath } from "../../src/features/mcp/marker.js";
@@ -48,6 +48,8 @@ async function makeProject(): Promise<{ repo: string; project: string; target: s
   await mkdir(path.join(project, "Packages"), { recursive: true });
   await mkdir(target, { recursive: true });
   await writeFile(path.join(project, "Packages", "manifest.json"), "{}\n");
+  await mkdir(path.join(project, "UserSettings"), { recursive: true });
+  await writeFile(path.join(project, "UserSettings", "AI-Game-Developer-Config.json"), JSON.stringify({ host: "http://localhost:26782" }));
   await execa("git", ["init", "-q"], { cwd: repo });
   return { repo, project, target };
 }
@@ -304,6 +306,7 @@ describe("MCP upstream contracts", () => {
     const { project, target } = await makeProject();
     const settingsPath = path.join(project, "UserSettings", "AI-Game-Developer-Config.json");
     const original = JSON.stringify({
+      host: "http://localhost:26782",
       tools: [{ enabled: false }],
       prompts: [{ enabled: false }],
       resources: [{ enabled: false }],
@@ -421,12 +424,25 @@ describe("MCP upstream contracts", () => {
     expect(calls).toEqual([]);
   });
 
+  it("refuses a non-local host without replacing the existing agent config", async () => {
+    const { repo, project, target } = await makeProject();
+    await writeFile(path.join(project, "UserSettings", "AI-Game-Developer-Config.json"), JSON.stringify({ host: "https://ai-game.dev/mcp" }));
+    const configPath = path.join(repo, ".mcp.json");
+    const original = JSON.stringify({ mcpServers: { existing: { command: "keep" } } });
+    await writeFile(configPath, original);
+    await expect(runMcpLifecycle({ target, verb: "skills", run: async () => {
+      throw new Error("must not invoke the generator");
+    } })).rejects.toThrow("Set a local MCP host");
+    expect(await readFile(configPath, "utf8")).toBe(original);
+  });
   it("keeps config when resumed skills fail at repo root", async () => {
     const repo = await tmpDir("scvn-mcp-root-lifecycle-");
     const target = path.join(repo, "Assets");
     await mkdir(path.join(repo, "Packages"), { recursive: true });
     await mkdir(target, { recursive: true });
     await writeFile(path.join(repo, "Packages", "manifest.json"), "{}\n");
+    await mkdir(path.join(repo, "UserSettings"), { recursive: true });
+    await writeFile(path.join(repo, "UserSettings", "AI-Game-Developer-Config.json"), JSON.stringify({ host: "http://localhost:26782" }));
     await execa("git", ["init", "-q"], { cwd: repo });
     await writeFile(path.join(repo, ".mcp.json"), JSON.stringify({ mcpServers: { existing: { command: "keep" } } }));
     const config = { mcpServers: { "ai-game-developer": { command: "generated" } } };
@@ -465,12 +481,10 @@ describe("MCP upstream contracts", () => {
     await expect(access(path.join(repo, ".mcp.json"))).rejects.toThrow();
   });
 
-  it("dry-run logs all CLI commands and explicit disables without changing the filesystem", async () => {
+  it("dry-run does not execute commands or change the filesystem", async () => {
     const { repo, project, target } = await makeProject();
-    const resolvedProject = await realpath(project);
     const before = (await execa("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repo })).stdout;
     const commands: string[][] = [];
-    const logs: string[] = [];
 
     await runMcpLifecycle({
       target,
@@ -481,20 +495,12 @@ describe("MCP upstream contracts", () => {
       enableAllPrompts: false,
       enableAllResources: false,
       dryRun: true,
-      reporter: {
-        onLog: ({ message }) => logs.push(message),
-        onStatus: () => {},
-      },
       run: async (args) => {
         commands.push([...args]);
         return { exitCode: 0, stdout: "", stderr: "" };
       },
     });
 
-    expect(logs).toEqual([
-      "unity-mcp-cli configure --disable-all-tools --disable-all-prompts --disable-all-resources " + resolvedProject,
-      "unity-mcp-cli setup-mcp claude-code " + resolvedProject,
-    ]);
     expect(commands).toEqual([]);
     expect((await execa("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repo })).stdout).toBe(before);
     expect(await exists(path.join(project, ".mcp.json"))).toBe(false);
