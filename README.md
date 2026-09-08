@@ -17,7 +17,7 @@ The same engine also ships as the `scvn` command-line tool; see
 ## Install
 
 1. **Download** the latest release from
-   [GitHub Releases](https://github.com/Supercent-Vietnam/scvn-cli/releases/latest)
+   [GitHub Releases](https://github.com/SCVN-Zee/scvn-cli/releases/latest)
    — grab the `Supercent-VN-Tools-<version>-arm64.dmg` file.
 2. Open the `.dmg` and drag **Supercent VN Tools** into your
    **Applications** folder.
